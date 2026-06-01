@@ -1,0 +1,30 @@
+# AI Receptionist — Caddy reverse proxy with automatic HTTPS.
+#
+# 1. Point your domain's A record at the Oracle VM's public IP.
+# 2. Replace YOURDOMAIN.com below with your actual domain.
+# 3. Install Caddy on the VM:
+#      sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+#      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+#      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+#      sudo apt update && sudo apt install -y caddy
+# 4. Copy this file:
+#      sudo cp scripts/Caddyfile.template /etc/caddy/Caddyfile
+#      sudo nano /etc/caddy/Caddyfile      # replace YOURDOMAIN.com
+#      sudo systemctl reload caddy
+#
+# Caddy will obtain & renew a free Let's Encrypt cert automatically.
+
+YOURDOMAIN.com {
+    # HTTP API + Jinja2 UI
+    reverse_proxy localhost:8000
+
+    # WebSocket for Pipecat voice pipeline — same domain, different path
+    @ws path /ws* /pipecat*
+    reverse_proxy @ws localhost:8001
+
+    encode gzip zstd
+    log {
+        output file /var/log/caddy/ai-receptionist.log
+        format console
+    }
+}
