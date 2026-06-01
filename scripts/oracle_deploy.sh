@@ -47,13 +47,23 @@ else
     log "Docker already installed."
 fi
 
-# ---------- 3. Host firewall (Oracle has its own Security List too) ----------
-log "Configuring host firewall (iptables on Ubuntu 22.04 Oracle image needs explicit allow)..."
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80   -j ACCEPT || true
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443  -j ACCEPT || true
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8000 -j ACCEPT || true
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8001 -j ACCEPT || true
-sudo netfilter-persistent save 2>/dev/null || sudo apt-get install -y iptables-persistent
+# ---------- 3. Host firewall (Oracle Ubuntu image needs explicit allow) ----------
+log "Configuring host firewall..."
+
+# Pre-seed debconf so iptables-persistent installs silently (curl|bash has no TTY)
+echo 'iptables-persistent iptables-persistent/autosave_v4 boolean true' \
+    | sudo debconf-set-selections
+echo 'iptables-persistent iptables-persistent/autosave_v6 boolean true' \
+    | sudo debconf-set-selections
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+
+# Insert ACCEPT rules ahead of the default REJECT (-C checks if rule already exists)
+for port in 80 443 8000 8001; do
+    sudo iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null \
+        || sudo iptables -I INPUT -p tcp --dport "$port" -j ACCEPT
+done
+
+sudo netfilter-persistent save
 
 # ---------- 4. Clone or update repo ----------
 if [[ -d "$APP_DIR/.git" ]]; then
