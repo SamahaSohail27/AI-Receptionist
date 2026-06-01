@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Clinic Settings{% endblock %}
+{% block page_title %}Settings — Clinic{% endblock %}
+
+{% block content %}
+<div
+  x-data="{
+    saving: false,
+    addingHoliday: false,
+    newHoliday: { date: '', name: '' },
+    form: {
+      clinic_name_en: '',
+      clinic_name_ur: '',
+      clinic_phone: '',
+      clinic_address: '',
+      emergency_transfer_number: '',
+      escalation_transfer_number: '',
+      working_days: ['Mon','Tue','Wed','Thu','Fri','Sat'],
+      working_hours_start: '09:00',
+      working_hours_end: '17:00',
+      appointment_duration_mins: 20,
+      max_appointments_per_slot: 1,
+      holidays: []
+    },
+    days: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+
+    async init() {
+      const r = await $store.app.api('/settings/clinic');
+      if (r && r.ok) {
+        const d = await r.json();
+        this.form = { ...this.form, ...d };
+      }
+    },
+
+    async save() {
+      this.saving = true;
+      const r = await $store.app.api('/settings/clinic', { method: 'PUT', body: JSON.stringify(this.form) });
+      if (r && r.ok) $store.app.addNotification('success', 'Clinic settings saved');
+      else $store.app.addNotification('warning', 'Save failed');
+      this.saving = false;
+    },
+
+    toggleDay(day) {
+      if (this.form.working_days.includes(day)) {
+        this.form.working_days = this.form.working_days.filter(d => d !== day);
+      } else {
+        this.form.working_days.push(day);
+      }
+    },
+
+    addHoliday() {
+      if (this.newHoliday.date && this.newHoliday.name) {
+        this.form.holidays.push({ ...this.newHoliday });
+        this.form.holidays.sort((a, b) => a.date.localeCompare(b.date));
+        this.newHoliday = { date: '', name: '' };
+        this.addingHoliday = false;
+      }
+    },
+
+    removeHoliday(idx) {
+      this.form.holidays.splice(idx, 1);
+    }
+  }"
+  class="max-w-3xl space-y-6">
+
+  <!-- Clinic Info -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+    <h2 class="text-base font-semibold text-slate-100 mb-4">Clinic Information</h2>
+    <div class="space-y-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">Clinic Name (English)</label>
+          <input type="text" x-model="form.clinic_name_en" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="City Medical Centre" />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">Clinic Name (Urdu)</label>
+          <input type="text" x-model="form.clinic_name_ur" dir="rtl" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm urdu-text focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="سٹی میڈیکل سینٹر" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Clinic Phone (E.164)</label>
+        <input type="text" x-model="form.clinic_phone" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="+92XXXXXXXXXX" />
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Clinic Address</label>
+        <textarea x-model="form.clinic_address" rows="2" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none" placeholder="123 Main Street, Lahore, Punjab"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transfer Numbers -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+    <h2 class="text-base font-semibold text-slate-100 mb-4">Transfer Numbers</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Emergency Transfer Number</label>
+        <input type="text" x-model="form.emergency_transfer_number" class="w-full bg-slate-900 border border-red-600/50 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500" placeholder="+92XXXXXXXXXX" />
+        <p class="text-xs text-red-400 mt-1">Used when emergency keywords detected — hard transfer ≤10s</p>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Escalation Transfer Number (Human Receptionist)</label>
+        <input type="text" x-model="form.escalation_transfer_number" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="+92XXXXXXXXXX" />
+        <p class="text-xs text-slate-500 mt-1">Used when caller requests human or AI cannot resolve query</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scheduling -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+    <h2 class="text-base font-semibold text-slate-100 mb-4">Scheduling</h2>
+    <div class="space-y-5">
+      <!-- Working Days -->
+      <div>
+        <label class="block text-sm text-slate-300 mb-2">Working Days</label>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="day in days" :key="day">
+            <button
+              @click="toggleDay(day)"
+              :class="form.working_days.includes(day) ? 'bg-sky-500 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'"
+              class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+              x-text="day">
+            </button>
+          </template>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Juma (Friday) hours may differ — configure per-doctor availability on the Doctors page</p>
+      </div>
+      <!-- Working Hours -->
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">Working Hours Start (PKT)</label>
+          <input type="time" x-model="form.working_hours_start" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">Working Hours End (PKT)</label>
+          <input type="time" x-model="form.working_hours_end" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+        </div>
+      </div>
+      <!-- Slot settings -->
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">Appointment Duration (minutes)</label>
+          <input type="number" x-model.number="form.appointment_duration_mins" min="5" max="120" step="5" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">Max Patients per Slot</label>
+          <input type="number" x-model.number="form.max_appointments_per_slot" min="1" max="10" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Holidays -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-base font-semibold text-slate-100">Public Holidays</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Eid dates must be added manually (lunar calendar)</p>
+      </div>
+      <button @click="addingHoliday = !addingHoliday" class="flex items-center gap-1.5 px-3 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-400 text-sm rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Add Holiday
+      </button>
+    </div>
+
+    <!-- Add Holiday Form -->
+    <div x-show="addingHoliday" x-transition class="mb-4 p-4 bg-slate-900/60 rounded-xl border border-slate-700">
+      <div class="flex items-end gap-3">
+        <div class="flex-1">
+          <label class="block text-xs text-slate-400 mb-1">Date</label>
+          <input type="date" x-model="newHoliday.date" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-slate-400 mb-1">Name</label>
+          <input type="text" x-model="newHoliday.name" placeholder="e.g. Eid ul Fitr" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+        </div>
+        <button @click="addHoliday()" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition-colors">Add</button>
+        <button @click="addingHoliday = false" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm rounded-lg transition-colors">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Holidays Table -->
+    <div class="space-y-2">
+      <template x-if="form.holidays.length === 0">
+        <p class="text-slate-500 text-sm text-center py-6">No holidays configured</p>
+      </template>
+      <template x-for="(h, idx) in form.holidays" :key="h.date">
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-700/40 transition-colors">
+          <div class="flex items-center gap-3">
+            <span class="text-xs font-mono text-sky-400" x-text="h.date"></span>
+            <span class="text-sm text-slate-200" x-text="h.name"></span>
+          </div>
+          <button @click="removeHoliday(idx)" class="text-slate-500 hover:text-red-400 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <button @click="save()" :disabled="saving" class="flex items-center gap-2 px-6 py-2.5 bg-sky-500 hover:bg-sky-400 text-white font-semibold rounded-xl transition-colors disabled:opacity-50">
+      <svg x-show="saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      <span x-text="saving ? 'Saving…' : 'Save Clinic Settings'"></span>
+    </button>
+  </div>
+
+</div>
+{% endblock %}

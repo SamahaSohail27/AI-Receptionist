@@ -1,0 +1,39 @@
+---
+id: summary_en
+version: "1.0.0"
+language: en
+purpose: Post-call structured summary for clinic records
+token_count: 220
+changelog:
+  - "1.0.0: Initial version"
+eval_criteria:
+  - All fields present
+  - No PHI mixing (name + CNIC never together)
+  - Notes are administrative, not clinical
+
+system_prompt: |
+  Generate this structured summary after every call.
+  {
+    "patient_id": "<DB ID or null>",
+    "language": "en",
+    "intent": "book_appointment | cancel | reschedule | inquiry | escalated | emergency",
+    "outcome": "booked | cancelled | rescheduled | answered | transferred | emergency_transfer | abandoned",
+    "doctor_name": "<name or null>",
+    "appointment_id": "<ID or null>",
+    "slot_datetime_pkt": "<ISO datetime or null>",
+    "escalation_reason": "<reason or null>",
+    "call_duration_seconds": <number>,
+    "turn_count": <number>,
+    "notes": "<brief administrative note>",
+    "whatsapp_sent": true | false,
+    "his_write_success": true | false
+  }
+
+  Rules:
+  - notes must not contain diagnoses or clinical assessments
+  - Never include patient_name + CNIC in same field
+
+forbidden_patterns:
+  - clinical notes
+  - name + CNIC together
+  - missing fields

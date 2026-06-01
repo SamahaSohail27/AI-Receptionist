@@ -1,0 +1,65 @@
+---
+id: date_ur
+version: "1.0.0"
+language: ur-PK
+purpose: Extract and normalize date/time expressions from Pakistani Urdu
+token_count: 290
+eval_criteria:
+  - Converts all Urdu relative date expressions to absolute PKT datetime
+  - Handles Islamic calendar references (Eid ke baad, Ramzan mein)
+  - Handles relative time (صبح, دوپہر, شام) correctly
+  - Never confuses AM/PM in Urdu time expressions
+changelog:
+  - "1.0.0: Initial version"
+
+date_expressions_ur:
+  today: ["آج", "ابھی", "فوری"]
+  tomorrow: ["کل", "کل کو"]
+  day_after: ["پرسوں"]
+  this_week: ["اس ہفتے", "اس ہفتہ"]
+  next_week: ["اگلے ہفتے", "اگلا ہفتہ"]
+  next_month: ["اگلے مہینے"]
+  end_of_month: ["مہینے کے آخر میں", "آخر مہینہ"]
+
+  days_ur:
+    sunday: ["اتوار", "اتوار کو"]
+    monday: ["پیر", "پیر کو", "سوموار"]
+    tuesday: ["منگل", "منگل کو"]
+    wednesday: ["بدھ", "بدھ کو"]
+    thursday: ["جمعرات", "جمعرات کو"]
+    friday: ["جمعہ", "جمعہ کو"]
+    saturday: ["ہفتہ", "ہفتے کو"]
+
+  time_windows_ur:
+    morning: ["صبح", "صبح سویرے"]  # 09:00–12:00
+    noon: ["دوپہر"]                  # 12:00–15:00
+    afternoon: ["تیسرے پہر"]        # 15:00–17:00
+    evening: ["شام"]                # 17:00–19:00
+    early: ["جلدی", "جلد از جلد", "سب سے جلدی"]
+
+system_prompt: |
+  آپ ایک تاریخ اور وقت نکالنے والا ماڈیول ہیں۔
+  آج کی تاریخ اور وقت (PKT): [TODAY_PKT_DATETIME]
+
+  مریض کی بات سے تاریخ اور وقت نکالیں اور ISO 8601 format میں دیں۔
+  مثال: "پرسوں دوپہر" → "2026-04-26T13:00:00+05:00"
+
+  اگر صرف دن بتایا ہو اور وقت نہیں:
+  - صبح → 09:00
+  - دوپہر → 13:00
+  - شام → 17:00
+  - کوئی وقت نہیں → null (سسٹم صبح کا وقت لے گا)
+
+examples:
+  - input: "پرسوں دوپہر"
+    output: {date: "2026-04-26", time: "13:00", window: "afternoon", confidence: "high"}
+  - input: "اگلے منگل کو"
+    output: {date: "2026-04-28", time: null, window: null, confidence: "high"}
+  - input: "جلدی سے جلدی"
+    output: {date: "earliest_available", time: null, window: "morning", confidence: "high"}
+  - input: "کوئی بھی وقت"
+    output: {date: "any", time: null, window: null, confidence: "high"}
+
+forbidden_patterns:
+  - assuming time without patient confirmation if ambiguous
+  - confusing 12:00 noon with midnight

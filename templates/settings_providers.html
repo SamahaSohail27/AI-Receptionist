@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}Providers — Settings{% endblock %}
+{% block page_title %}Settings — Providers{% endblock %}
+
+{% block content %}
+<div
+  x-data="{
+    saving: false,
+    testing: {},
+    testResults: {},
+    elevenlabsVoices: { female: [], male: [] },
+    elevenlabsModels: [],
+    openaiVoices: { female: [], male: [] },
+    form: {
+      stt_provider: 'deepgram',
+      llm_provider: 'openai',
+      tts_provider: 'azure',
+      stt_fallback_provider: 'groq_whisper',
+      llm_fallback_provider: 'groq',
+      tts_fallback_provider: 'openai_tts',
+      elevenlabs_voice_id: '',
+      elevenlabs_voice_id_female: '',
+      elevenlabs_voice_id_male: '',
+      elevenlabs_model_id: 'eleven_flash_v2_5',
+      openai_realtime_voice_female: 'shimmer',
+      openai_realtime_voice_male: 'echo',
+      openai_model: 'gpt-4o-mini',
+      groq_model: 'llama-3.1-8b-instant',
+      deepgram_model: 'nova-2'
+    },
+
+    async init() {
+      const [r, v, m, o] = await Promise.all([
+        $store.app.api('/settings/providers'),
+        $store.app.api('/settings/providers/elevenlabs-voices'),
+        $store.app.api('/settings/providers/elevenlabs-models'),
+        $store.app.api('/settings/providers/openai-realtime-voices')
+      ]);
+      if (r && r.ok) {
+        const d = await r.json();
+        this.form = { ...this.form, ...d };
+      }
+      if (v && v.ok) {
+        const d = await v.json();
+        this.elevenlabsVoices = { female: d.female || [], male: d.male || [] };
+        if (!this.form.elevenlabs_voice_id_female) this.form.elevenlabs_voice_id_female = d.default_female || '';
+        if (!this.form.elevenlabs_voice_id_male) this.form.elevenlabs_voice_id_male = d.default_male || '';
+      }
+      if (m && m.ok) {
+        const d = await m.json();
+        this.elevenlabsModels = d.models || [];
+        if (!this.form.elevenlabs_model_id) this.form.elevenlabs_model_id = d.default || 'eleven_flash_v2_5';
+      }
+      if (o && o.ok) {
+        const d = await o.json();
+        this.openaiVoices = { female: d.female || [], male: d.male || [] };
+        if (!this.form.openai_realtime_voice_female) this.form.openai_realtime_voice_female = d.default_female || 'shimmer';
+        if (!this.form.openai_realtime_voice_male) this.form.openai_realtime_voice_male = d.default_male || 'echo';
+      }
+    },
+
+    async save() {
+      this.saving = true;
+      const r = await $store.app.api('/settings/providers', { method: 'PUT', body: JSON.stringify(this.form) });
+      if (r && r.ok) {
+        $store.app.addNotification('success', 'Provider settings saved');
+      } else {
+        $store.app.addNotification('warning', 'Save failed — check server logs');
+      }
+      this.saving = false;
+    },
+
+    async testProvider(provider) {
+      this.testing[provider] = true;
+      this.testResults[provider] = null;
+      const r = await $store.app.api('/settings/providers/test', { method: 'POST', body: JSON.stringify({ provider }) });
+      if (r && r.ok) {
+        const d = await r.json();
+        this.testResults[provider] = d;
+      } else {
+        this.testResults[provider] = { ok: false, error: 'HTTP ' + r?.status };
+      }
+      this.testing[provider] = false;
+    }
+  }"
+  class="max-w-3xl space-y-6">
+
+  <!-- STT Providers -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+    <h2 class="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
+      <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+      Speech-to-Text (STT)
+    </h2>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Primary STT Provider</label>
+        <select x-model="form.stt_provider" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="deepgram">Deepgram Nova-2 (Recommended — Urdu/English)</option>
+          <option value="groq_whisper">Groq Whisper (Punjabi/fast)</option>
+          <option value="openai_whisper">OpenAI Whisper</option>
+          <option value="azure_speech">Azure Speech</option>
+          <option value="google_speech">Google Speech</option>
+          <option value="assemblyai">AssemblyAI</option>
+        </select>
+        <p class="text-xs text-slate-500 mt-1">Urdu threshold 0.45 · English 0.70 · Punjabi 0.40 (sacred — not editable)</p>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Fallback STT Provider</label>
+        <select x-model="form.stt_fallback_provider" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="groq_whisper">Groq Whisper</option>
+          <option value="deepgram">Deepgram</option>
+          <option value="google_speech">Google Speech</option>
+          <option value="openai_whisper">OpenAI Whisper</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Deepgram Model</label>
+        <select x-model="form.deepgram_model" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="nova-2">nova-2 (default)</option>
+          <option value="nova">nova</option>
+          <option value="enhanced">enhanced</option>
+          <option value="base">base</option>
+        </select>
+      </div>
+      <button @click="testProvider('stt')" :disabled="testing.stt" class="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-sm text-slate-200 rounded-lg transition-colors disabled:opacity-50">
+        <svg x-show="testing.stt" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        Test STT Connection
+      </button>
+      <div x-show="testResults.stt" x-transition class="mt-2">
+        <p :class="testResults.stt?.ok ? 'text-green-400' : 'text-red-400'" class="text-sm font-medium" x-text="testResults.stt?.ok ? '✓ Connected — latency ' + testResults.stt?.latency_ms + 'ms' : '✗ ' + testResults.stt?.error"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- LLM Providers -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+    <h2 class="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
+      <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.03 3.03 0 0013.0 20.5H11a3.03 3.03 0 00-2.122-.879l-.347-.347z"/></svg>
+      Large Language Model (LLM)
+    </h2>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Primary LLM Provider</label>
+        <select x-model="form.llm_provider" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="openai">OpenAI (Recommended)</option>
+          <option value="anthropic">Anthropic Claude</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="groq">Groq (Ultra-fast)</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">OpenAI Model</label>
+        <select x-model="form.openai_model" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="gpt-4o-mini">gpt-4o-mini (default — cost-optimized)</option>
+          <option value="gpt-4o">gpt-4o (high accuracy)</option>
+          <option value="gpt-4-turbo">gpt-4-turbo</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Fallback LLM Provider</label>
+        <select x-model="form.llm_fallback_provider" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="groq">Groq</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Gemini</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Groq Model</label>
+        <input type="text" x-model="form.groq_model" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="llama-3.1-8b-instant" />
+      </div>
+      <button @click="testProvider('llm')" :disabled="testing.llm" class="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-sm text-slate-200 rounded-lg transition-colors disabled:opacity-50">
+        <svg x-show="testing.llm" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        Test LLM Connection
+      </button>
+      <div x-show="testResults.llm" x-transition>
+        <p :class="testResults.llm?.ok ? 'text-green-400' : 'text-red-400'" class="text-sm font-medium" x-text="testResults.llm?.ok ? '✓ Connected — TTFT ' + testResults.llm?.ttft_ms + 'ms' : '✗ ' + testResults.llm?.error"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- TTS Providers -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+    <h2 class="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
+      <svg class="w-5 h-5 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 9.5v5m-5.536-6.036a5 5 0 000 7.072M9 12h6"/></svg>
+      Text-to-Speech (TTS)
+    </h2>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Primary TTS Provider</label>
+        <select x-model="form.tts_provider" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="azure">Azure Neural (ur-PK-UzmaNeural — Urdu/Punjabi)</option>
+          <option value="openai_tts">OpenAI TTS (nova — English)</option>
+          <option value="elevenlabs">ElevenLabs (eleven_flash_v2_5 only)</option>
+          <option value="google_tts">Google TTS</option>
+          <option value="cartesia">Cartesia (English only)</option>
+        </select>
+        <p class="text-xs text-slate-500 mt-1">Azure ur-PK-UzmaNeural is used for Urdu and Punjabi (no dedicated Punjabi TTS exists)</p>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Fallback TTS Provider</label>
+        <select x-model="form.tts_fallback_provider" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="openai_tts">OpenAI TTS</option>
+          <option value="azure">Azure Neural</option>
+          <option value="google_tts">Google TTS</option>
+        </select>
+      </div>
+      <!-- OpenAI Realtime Voices (shown when tts_provider == openai_tts) -->
+      <div x-show="form.tts_provider === 'openai_tts'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">OpenAI Realtime — Female Voice</label>
+          <select x-model="form.openai_realtime_voice_female" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <template x-for="v in openaiVoices.female" :key="v.voice_id">
+              <option :value="v.voice_id" x-text="v.name + ' — ' + v.description"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">OpenAI Realtime — Male Voice</label>
+          <select x-model="form.openai_realtime_voice_male" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <template x-for="v in openaiVoices.male" :key="v.voice_id">
+              <option :value="v.voice_id" x-text="v.name + ' — ' + v.description"></option>
+            </template>
+          </select>
+        </div>
+        <p class="text-xs text-slate-500 md:col-span-2 -mt-1">Used by the browser realtime test session and any pipecat pipeline configured for OpenAI TTS.</p>
+      </div>
+
+      <!-- ElevenLabs voices (shown when tts_provider == elevenlabs) -->
+      <div x-show="form.tts_provider === 'elevenlabs'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">ElevenLabs Female Voice</label>
+          <select x-model="form.elevenlabs_voice_id_female" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <template x-for="v in elevenlabsVoices.female" :key="v.voice_id">
+              <option :value="v.voice_id" x-text="v.name + ' — ' + v.description"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm text-slate-300 mb-1.5">ElevenLabs Male Voice</label>
+          <select x-model="form.elevenlabs_voice_id_male" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <template x-for="v in elevenlabsVoices.male" :key="v.voice_id">
+              <option :value="v.voice_id" x-text="v.name + ' — ' + v.description"></option>
+            </template>
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-sm text-slate-300 mb-1.5">ElevenLabs Model</label>
+          <select x-model="form.elevenlabs_model_id" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <template x-for="m in elevenlabsModels" :key="m.model_id">
+              <option :value="m.model_id" x-text="m.name + ' — ' + m.description"></option>
+            </template>
+          </select>
+          <p class="text-xs text-amber-500 mt-1">⚠ v3 is blocked at the adapter (HTTP 403 from upstream). Flash is the safe default.</p>
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm text-slate-300 mb-1.5">Custom Voice ID (optional override)</label>
+        <input type="text" x-model="form.elevenlabs_voice_id" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="Paste a custom ElevenLabs voice ID to override presets" />
+        <p class="text-xs text-slate-500 mt-1">Tuned for natural delivery (stability 0.4 · style 0.3 · speaker boost on)</p>
+        <p class="text-xs text-amber-500 mt-1">⚠ Model locked to eleven_flash_v2_5 — v3 returns HTTP 403</p>
+      </div>
+      <button @click="testProvider('tts')" :disabled="testing.tts" class="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-sm text-slate-200 rounded-lg transition-colors disabled:opacity-50">
+        <svg x-show="testing.tts" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        Test TTS Connection
+      </button>
+      <div x-show="testResults.tts" x-transition>
+        <p :class="testResults.tts?.ok ? 'text-green-400' : 'text-red-400'" class="text-sm font-medium" x-text="testResults.tts?.ok ? '✓ Audio generated — ' + testResults.tts?.bytes + ' bytes' : '✗ ' + testResults.tts?.error"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Button -->
+  <div class="flex items-center gap-3">
+    <button @click="save()" :disabled="saving" class="flex items-center gap-2 px-6 py-2.5 bg-sky-500 hover:bg-sky-400 text-white font-semibold rounded-xl transition-colors disabled:opacity-50">
+      <svg x-show="saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      <span x-text="saving ? 'Saving…' : 'Save Provider Settings'"></span>
+    </button>
+    <p class="text-xs text-slate-500">Changes apply to new calls immediately</p>
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}System Health{% endblock %}
+{% block page_title %}Settings — System Health{% endblock %}
+
+{% block content %}
+<div
+  x-data="{
+    health: null,
+    loading: true,
+    refreshing: false,
+    lastRefreshed: null,
+    logs: [],
+    logsLoading: false,
+
+    async init() {
+      await this.loadHealth();
+      await this.loadLogs();
+      setInterval(() => this.loadHealth(), 15000);
+    },
+
+    async loadHealth() {
+      this.refreshing = true;
+      const r = await $store.app.api('/health/detailed');
+      if (r && r.ok) {
+        this.health = await r.json();
+        this.lastRefreshed = new Date().toLocaleTimeString();
+      }
+      this.loading = false;
+      this.refreshing = false;
+    },
+
+    async loadLogs() {
+      this.logsLoading = true;
+      const r = await $store.app.api('/health/logs?limit=50');
+      if (r && r.ok) {
+        const d = await r.json();
+        this.logs = d.logs || [];
+      }
+      this.logsLoading = false;
+    },
+
+    statusColor(s) {
+      if (s === 'ok' || s === 'healthy' || s === true) return 'text-green-400';
+      if (s === 'warn' || s === 'degraded') return 'text-yellow-400';
+      return 'text-red-400';
+    },
+    statusDot(s) {
+      if (s === 'ok' || s === 'healthy' || s === true) return 'bg-green-400';
+      if (s === 'warn' || s === 'degraded') return 'bg-yellow-400';
+      return 'bg-red-400';
+    },
+    statusLabel(s) {
+      if (s === 'ok' || s === 'healthy' || s === true) return 'Healthy';
+      if (s === 'warn' || s === 'degraded') return 'Degraded';
+      return 'Down';
+    },
+    logLevelClass(level) {
+      const m = { ERROR: 'text-red-400', WARNING: 'text-yellow-400', INFO: 'text-slate-300', DEBUG: 'text-slate-500' };
+      return m[level] || 'text-slate-400';
+    }
+  }"
+  class="space-y-6">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <p class="text-xs text-slate-400" x-text="lastRefreshed ? 'Last refreshed: ' + lastRefreshed : 'Loading…'"></p>
+    </div>
+    <button @click="loadHealth()" :disabled="refreshing" class="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-sm text-slate-200 rounded-lg transition-colors disabled:opacity-50">
+      <svg :class="refreshing ? 'animate-spin' : ''" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <!-- Overall Status Banner -->
+  <div x-show="health" x-transition>
+    <div :class="{
+      'bg-green-900/30 border-green-500/50': health?.overall === 'healthy',
+      'bg-yellow-900/30 border-yellow-500/50': health?.overall === 'degraded',
+      'bg-red-900/30 border-red-500/50': health?.overall === 'unhealthy'
+    }" class="rounded-xl border p-4 flex items-center gap-4">
+      <div :class="statusDot(health?.overall)" class="w-4 h-4 rounded-full animate-pulse flex-shrink-0"></div>
+      <div>
+        <p class="font-semibold text-slate-100" x-text="'System ' + statusLabel(health?.overall)"></p>
+        <p class="text-xs text-slate-400 mt-0.5" x-text="health?.message || ''"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skeleton while loading -->
+  <template x-if="loading">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <template x-for="i in [1,2,3,4,5,6]" :key="i">
+        <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 h-28 skeleton"></div>
+      </template>
+    </div>
+  </template>
+
+  <!-- Service Cards -->
+  <template x-if="!loading && health">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+      <!-- Database -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582 4 8 4s8 1.79 8 4"/></svg>
+            <span class="text-sm font-medium text-slate-200">PostgreSQL</span>
+          </div>
+          <div :class="statusDot(health.services?.database?.status)" class="w-2.5 h-2.5 rounded-full"></div>
+        </div>
+        <p :class="statusColor(health.services?.database?.status)" class="text-sm font-medium" x-text="statusLabel(health.services?.database?.status)"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="health.services?.database?.latency_ms ? health.services.database.latency_ms + 'ms round-trip' : ''"></p>
+      </div>
+
+      <!-- Redis -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span class="text-sm font-medium text-slate-200">Redis</span>
+          </div>
+          <div :class="statusDot(health.services?.redis?.status)" class="w-2.5 h-2.5 rounded-full"></div>
+        </div>
+        <p :class="statusColor(health.services?.redis?.status)" class="text-sm font-medium" x-text="statusLabel(health.services?.redis?.status)"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="health.services?.redis?.memory_used ? health.services.redis.memory_used : ''"></p>
+      </div>
+
+      <!-- Celery -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+            <span class="text-sm font-medium text-slate-200">Celery Workers</span>
+          </div>
+          <div :class="statusDot(health.services?.celery?.status)" class="w-2.5 h-2.5 rounded-full"></div>
+        </div>
+        <p :class="statusColor(health.services?.celery?.status)" class="text-sm font-medium" x-text="statusLabel(health.services?.celery?.status)"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="(health.services?.celery?.active_workers ?? '?') + ' workers active'"></p>
+      </div>
+
+      <!-- STT Provider -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+            <span class="text-sm font-medium text-slate-200">STT</span>
+          </div>
+          <div :class="statusDot(health.services?.stt?.status)" class="w-2.5 h-2.5 rounded-full"></div>
+        </div>
+        <p :class="statusColor(health.services?.stt?.status)" class="text-sm font-medium" x-text="statusLabel(health.services?.stt?.status)"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="health.services?.stt?.provider || ''"></p>
+      </div>
+
+      <!-- LLM Provider -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.03 3.03 0 0013 20.5H11a3.03 3.03 0 00-2.122-.879l-.347-.347z"/></svg>
+            <span class="text-sm font-medium text-slate-200">LLM</span>
+          </div>
+          <div :class="statusDot(health.services?.llm?.status)" class="w-2.5 h-2.5 rounded-full"></div>
+        </div>
+        <p :class="statusColor(health.services?.llm?.status)" class="text-sm font-medium" x-text="statusLabel(health.services?.llm?.status)"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="health.services?.llm?.provider || ''"></p>
+      </div>
+
+      <!-- TTS Provider -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 9.5v5m-5.536-6.036a5 5 0 000 7.072M9 12h6"/></svg>
+            <span class="text-sm font-medium text-slate-200">TTS</span>
+          </div>
+          <div :class="statusDot(health.services?.tts?.status)" class="w-2.5 h-2.5 rounded-full"></div>
+        </div>
+        <p :class="statusColor(health.services?.tts?.status)" class="text-sm font-medium" x-text="statusLabel(health.services?.tts?.status)"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="health.services?.tts?.provider || ''"></p>
+      </div>
+
+    </div>
+  </template>
+
+  <!-- Resource Meters -->
+  <template x-if="!loading && health?.resources">
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-6">
+      <h2 class="text-base font-semibold text-slate-100 mb-4">Resource Usage</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <div>
+          <div class="flex items-center justify-between text-sm mb-1.5">
+            <span class="text-slate-300">CPU</span>
+            <span class="text-slate-400 font-mono" x-text="(health.resources.cpu_percent || 0).toFixed(1) + '%'"></span>
+          </div>
+          <div class="w-full bg-slate-700 rounded-full h-2">
+            <div :style="'width:' + (health.resources.cpu_percent || 0) + '%'"
+              :class="(health.resources.cpu_percent || 0) > 80 ? 'bg-red-500' : (health.resources.cpu_percent || 0) > 60 ? 'bg-yellow-500' : 'bg-sky-500'"
+              class="h-2 rounded-full transition-all duration-500"></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between text-sm mb-1.5">
+            <span class="text-slate-300">Memory</span>
+            <span class="text-slate-400 font-mono" x-text="(health.resources.memory_percent || 0).toFixed(1) + '%'"></span>
+          </div>
+          <div class="w-full bg-slate-700 rounded-full h-2">
+            <div :style="'width:' + (health.resources.memory_percent || 0) + '%'"
+              :class="(health.resources.memory_percent || 0) > 85 ? 'bg-red-500' : (health.resources.memory_percent || 0) > 70 ? 'bg-yellow-500' : 'bg-teal-500'"
+              class="h-2 rounded-full transition-all duration-500"></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between text-sm mb-1.5">
+            <span class="text-slate-300">Disk</span>
+            <span class="text-slate-400 font-mono" x-text="(health.resources.disk_percent || 0).toFixed(1) + '%'"></span>
+          </div>
+          <div class="w-full bg-slate-700 rounded-full h-2">
+            <div :style="'width:' + (health.resources.disk_percent || 0) + '%'"
+              :class="(health.resources.disk_percent || 0) > 90 ? 'bg-red-500' : (health.resources.disk_percent || 0) > 75 ? 'bg-yellow-500' : 'bg-green-500'"
+              class="h-2 rounded-full transition-all duration-500"></div>
+          </div>
+        </div>
+      </div>
+      <div class="mt-4 flex items-center gap-6 text-xs text-slate-500">
+        <span x-text="'Uptime: ' + (health.resources.uptime || 'N/A')"></span>
+        <span x-text="'Active sessions: ' + (health.resources.active_sessions || 0)"></span>
+        <span x-text="'TTS cache entries: ' + (health.resources.tts_cache_entries || 0)"></span>
+      </div>
+    </div>
+  </template>
+
+  <!-- Recent Logs -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-base font-semibold text-slate-100">Recent Logs</h2>
+      <button @click="loadLogs()" :disabled="logsLoading" class="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50">Refresh</button>
+    </div>
+    <div class="font-mono text-xs space-y-1 max-h-72 overflow-y-auto bg-slate-900/60 rounded-xl p-4">
+      <template x-if="logsLoading">
+        <p class="text-slate-500">Loading logs…</p>
+      </template>
+      <template x-if="!logsLoading && logs.length === 0">
+        <p class="text-slate-500">No recent logs</p>
+      </template>
+      <template x-for="(log, idx) in logs" :key="idx">
+        <div class="flex gap-3 hover:bg-slate-800 px-2 py-0.5 rounded transition-colors">
+          <span class="text-slate-600 flex-shrink-0" x-text="log.time || ''"></span>
+          <span :class="logLevelClass(log.level)" class="flex-shrink-0 w-14" x-text="log.level || 'INFO'"></span>
+          <span class="text-slate-300 break-all" x-text="log.message"></span>
+        </div>
+      </template>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

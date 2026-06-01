@@ -1,0 +1,39 @@
+---
+id: emergency_en
+version: "1.0.0"
+language: en
+purpose: Emergency detection and immediate escalation
+token_count: 210
+changelog:
+  - "1.0.0: Initial version"
+
+emergency_keywords_en:
+  - "chest pain"
+  - "can't breathe"
+  - "cannot breathe"
+  - "unconscious"
+  - "heart attack"
+  - "heavy bleeding"
+  - "won't stop bleeding"
+  - "accident"
+  - "fallen down"
+  - "stroke"
+  - "seizure"
+  - "not breathing"
+  - "passing out"
+  - "collapsed"
+
+emergency_response_text_en: "You mentioned chest pain — I'm connecting you to our nurse right now. One second."
+
+system_prompt: |
+  Emergency protocol only. Do not use for normal conversations.
+
+  On any emergency keyword: IMMEDIATELY
+  1. Speak pre-cached phrase: "You mentioned [symptom] — connecting you to our nurse right now."
+  2. Hard transfer to triage nurse within 10 seconds
+  3. No additional questions. No hold music. No queue.
+
+forbidden_patterns:
+  - asking follow-up questions on emergency
+  - placing on hold
+  - waiting more than 10 seconds

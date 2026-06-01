@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+{% block title %}Call History — AI Medical Receptionist{% endblock %}
+{% block page_title %}Call History{% endblock %}
+
+{% block content %}
+<div
+  x-data="{
+    calls: [],
+    loading: true,
+    totalCount: 0,
+    page: 1,
+    pageSize: 10,
+    sort: 'recent',
+    filters: { dateFrom: '', dateTo: '', language: '', outcome: '', escalationsOnly: false },
+    selectedCall: null,
+    detailModal: false,
+    loadingDetail: false,
+
+    async init() {
+      await this.loadCalls();
+    },
+
+    async loadCalls() {
+      this.loading = true;
+      let params = new URLSearchParams({ page: this.page, page_size: this.pageSize, sort: this.sort });
+      if (this.filters.dateFrom) params.append('date_from', this.filters.dateFrom);
+      if (this.filters.dateTo) params.append('date_to', this.filters.dateTo);
+      if (this.filters.language) params.append('language', this.filters.language);
+      if (this.filters.outcome) params.append('outcome', this.filters.outcome);
+      if (this.filters.escalationsOnly) params.append('escalations_only', 'true');
+
+      const r = await $store.app.api('/calls/history?' + params.toString());
+      if (r && r.ok) {
+        const d = await r.json();
+        this.calls = d.items || d || [];
+        this.totalCount = (d.total != null) ? d.total : this.calls.length;
+      }
+      this.loading = false;
+    },
+
+    onSortChange() { this.page = 1; this.loadCalls(); },
+    onPageSizeChange() { this.page = 1; this.loadCalls(); },
+
+    async openDetail(call) {
+      this.detailModal = true;
+      this.loadingDetail = true;
+      this.selectedCall = { ...call, transcript: [], cost_breakdown: {}, latency_metrics: {} };
+      const r = await $store.app.api('/calls/session/' + call.session_id);
+      if (r && r.ok) {
+        const d = await r.json();
+        this.selectedCall = { ...this.selectedCall, ...d };
+      }
+      this.loadingDetail = false;
+    },
+
+    async exportCSV() {
+      let params = new URLSearchParams({ format: 'csv' });
+      if (this.filters.dateFrom) params.append('date_from', this.filters.dateFrom);
+      if (this.filters.dateTo) params.append('date_to', this.filters.dateTo);
+      if (this.filters.language) params.append('language', this.filters.language);
+      if (this.filters.outcome) params.append('outcome', this.filters.outcome);
+      window.location.href = '/api/v1/calls/history?' + params.toString();
+    },
+
+    applyFilters() { this.page = 1; this.loadCalls(); },
+    clearFilters() { this.filters = { dateFrom: '', dateTo: '', language: '', outcome: '', escalationsOnly: false }; this.applyFilters(); },
+    prevPage() { if (this.page > 1) { this.page--; this.loadCalls(); } },
+    nextPage() { if (this.page * this.pageSize < this.totalCount) { this.page++; this.loadCalls(); } },
+    get totalPages() { return Math.ceil(this.totalCount / this.pageSize); },
+
+    langBadgeClass(lang) {
+      const m = { ur: 'bg-sky-500/20 text-sky-400', pa: 'bg-green-500/20 text-green-400', en: 'bg-teal-500/20 text-teal-400' };
+      return m[lang] || 'bg-slate-600 text-slate-300';
+    },
+    langLabel(lang) {
+      const m = { ur: 'Urdu', pa: 'Punjabi', en: 'English' };
+      return m[lang] || lang;
+    },
+    outcomeBadgeClass(outcome) {
+      const m = { booked: 'bg-green-500/20 text-green-400', transferred: 'bg-yellow-500/20 text-yellow-400', completed: 'bg-teal-500/20 text-teal-400', failed: 'bg-red-500/20 text-red-400', no_action: 'bg-slate-500/20 text-slate-400' };
+      return m[outcome] || 'bg-slate-500/20 text-slate-400';
+    },
+    formatDuration(secs) {
+      if (!secs) return '—';
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      return m + 'm ' + s + 's';
+    },
+    truncateId(id) {
+      if (!id) return '—';
+      return id.substring(0, 8) + '...';
+    }
+  }"
+  class="space-y-5">
+
+  <!-- Filter Bar -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
+    <div class="flex flex-wrap items-end gap-4">
+      <div>
+        <label class="block text-xs text-slate-400 mb-1.5">From</label>
+        <input type="date" x-model="filters.dateFrom" class="bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" />
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1.5">To</label>
+        <input type="date" x-model="filters.dateTo" class="bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" />
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1.5">Language</label>
+        <select x-model="filters.language" class="bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500">
+          <option value="">All Languages</option>
+          <option value="ur">Urdu</option>
+          <option value="pa">Punjabi</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1.5">Outcome</label>
+        <select x-model="filters.outcome" class="bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500">
+          <option value="">All Outcomes</option>
+          <option value="booked">Booked</option>
+          <option value="transferred">Transferred</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="no_action">No Action</option>
+        </select>
+      </div>
+      <label class="flex items-center gap-2 cursor-pointer pb-2">
+        <input type="checkbox" x-model="filters.escalationsOnly" class="w-4 h-4 accent-yellow-500 rounded" />
+        <span class="text-sm text-slate-300">Escalations only</span>
+      </label>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1.5">Sort by</label>
+        <select x-model="sort" @change="onSortChange" class="bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500">
+          <option value="recent">Most recent</option>
+          <option value="oldest">Oldest first</option>
+          <option value="duration_desc">Longest duration</option>
+          <option value="duration_asc">Shortest duration</option>
+          <option value="cost_desc">Highest cost</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1.5">Per page</label>
+        <select x-model.number="pageSize" @change="onPageSizeChange" class="bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500">
+          <option :value="10">10</option>
+          <option :value="20">20</option>
+          <option :value="50">50</option>
+          <option :value="100">100</option>
+        </select>
+      </div>
+      <div class="flex items-end gap-2 pb-0.5">
+        <button @click="applyFilters" class="bg-sky-500 hover:bg-sky-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Apply</button>
+        <button @click="clearFilters" class="bg-slate-700 hover:bg-slate-600 text-slate-300 px-4 py-2 rounded-lg text-sm transition-colors">Clear</button>
+        <button @click="exportCSV" class="bg-teal-500/20 hover:bg-teal-500/30 text-teal-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Export CSV
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+      <h2 class="font-semibold text-slate-100">Call Records</h2>
+      <span class="text-sm text-slate-400" x-text="totalCount + ' total records'"></span>
+    </div>
+
+    <!-- Skeleton -->
+    <template x-if="loading">
+      <div class="p-4 space-y-3">
+        <template x-for="i in [1,2,3,4,5,6,7,8]" :key="i">
+          <div class="flex items-center gap-4 py-2">
+            <div class="h-4 rounded skeleton w-24"></div>
+            <div class="h-4 rounded skeleton w-32"></div>
+            <div class="h-4 rounded skeleton w-16"></div>
+            <div class="h-4 rounded skeleton w-20"></div>
+            <div class="h-4 rounded skeleton w-16"></div>
+            <div class="h-4 rounded skeleton w-12"></div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <template x-if="!loading">
+      <div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-slate-700">
+                <th class="text-left px-5 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Session ID</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Date & Time</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Language</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Outcome</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Duration</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Cost</th>
+                <th class="text-center px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Escalated</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-if="calls.length === 0">
+                <tr><td colspan="7" class="text-center py-10 text-slate-400">No records found</td></tr>
+              </template>
+              <template x-for="call in calls" :key="call.session_id">
+                <tr @click="openDetail(call)" class="border-b border-slate-700/50 hover:bg-slate-700/40 cursor-pointer transition-colors">
+                  <td class="px-5 py-3">
+                    <span class="font-mono text-xs text-sky-400" x-text="truncateId(call.session_id)"></span>
+                  </td>
+                  <td class="px-4 py-3 text-slate-300 whitespace-nowrap" x-text="call.created_at ? new Date(call.created_at).toLocaleString('en-PK') : '—'"></td>
+                  <td class="px-4 py-3">
+                    <span :class="langBadgeClass(call.language)" class="px-2.5 py-0.5 rounded-full text-xs font-medium" x-text="langLabel(call.language)"></span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span :class="outcomeBadgeClass(call.outcome)" class="px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" x-text="(call.outcome || 'unknown').replace('_', ' ')"></span>
+                  </td>
+                  <td class="px-4 py-3 text-slate-300" x-text="formatDuration(call.duration_seconds)"></td>
+                  <td class="px-4 py-3 text-slate-300" x-text="call.total_cost ? '$' + parseFloat(call.total_cost).toFixed(4) : '—'"></td>
+                  <td class="px-4 py-3 text-center">
+                    <template x-if="call.escalated">
+                      <span class="text-yellow-400">
+                        <svg class="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                      </span>
+                    </template>
+                    <template x-if="!call.escalated">
+                      <span class="text-slate-600">—</span>
+                    </template>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex items-center justify-between px-5 py-4 border-t border-slate-700">
+          <span class="text-sm text-slate-400" x-text="'Page ' + page + ' of ' + totalPages"></span>
+          <div class="flex gap-2">
+            <button @click="prevPage" :disabled="page <= 1" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-lg text-sm transition-colors">Previous</button>
+            <button @click="nextPage" :disabled="page >= totalPages" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-lg text-sm transition-colors">Next</button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Detail Modal -->
+  <div x-show="detailModal" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+    <div @click.away="detailModal = false" class="bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700 flex-shrink-0">
+        <div class="flex items-center gap-3">
+          <h3 class="text-lg font-semibold text-slate-100">Call Detail</h3>
+          <template x-if="selectedCall">
+            <span class="font-mono text-xs text-sky-400 bg-sky-500/10 px-2 py-1 rounded-lg" x-text="selectedCall.session_id"></span>
+          </template>
+        </div>
+        <button @click="detailModal = false" class="text-slate-400 hover:text-slate-100 transition-colors">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="overflow-y-auto flex-1 p-6">
+        <template x-if="loadingDetail">
+          <div class="space-y-4">
+            <template x-for="i in [1,2,3,4]" :key="i">
+              <div class="h-10 rounded-xl skeleton"></div>
+            </template>
+          </div>
+        </template>
+
+        <template x-if="!loadingDetail && selectedCall">
+          <div class="space-y-6">
+
+            <!-- Meta Info -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div class="bg-slate-900/60 rounded-xl p-3">
+                <p class="text-xs text-slate-500 mb-1">Language</p>
+                <span :class="langBadgeClass(selectedCall.language)" class="px-2 py-0.5 rounded-full text-xs font-medium" x-text="langLabel(selectedCall.language)"></span>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-3">
+                <p class="text-xs text-slate-500 mb-1">Outcome</p>
+                <span :class="outcomeBadgeClass(selectedCall.outcome)" class="px-2 py-0.5 rounded-full text-xs font-medium capitalize" x-text="(selectedCall.outcome || '—').replace('_', ' ')"></span>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-3">
+                <p class="text-xs text-slate-500 mb-1">Duration</p>
+                <p class="text-sm font-medium text-slate-200" x-text="formatDuration(selectedCall.duration_seconds)"></p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-3">
+                <p class="text-xs text-slate-500 mb-1">Total Cost</p>
+                <p class="text-sm font-medium text-slate-200" x-text="selectedCall.total_cost ? '$' + parseFloat(selectedCall.total_cost).toFixed(4) : '—'"></p>
+              </div>
+            </div>
+
+            <!-- Cost Breakdown -->
+            <div class="bg-slate-900/60 rounded-xl p-4">
+              <h4 class="text-sm font-semibold text-slate-300 mb-3">Cost Breakdown</h4>
+              <div class="grid grid-cols-4 gap-3 text-center text-sm">
+                <div><p class="text-xs text-slate-500 mb-1">STT</p><p class="text-slate-300" x-text="selectedCall.cost_breakdown?.stt ? '$' + selectedCall.cost_breakdown.stt.toFixed(5) : '—'"></p></div>
+                <div><p class="text-xs text-slate-500 mb-1">LLM</p><p class="text-slate-300" x-text="selectedCall.cost_breakdown?.llm ? '$' + selectedCall.cost_breakdown.llm.toFixed(5) : '—'"></p></div>
+                <div><p class="text-xs text-slate-500 mb-1">TTS</p><p class="text-slate-300" x-text="selectedCall.cost_breakdown?.tts ? '$' + selectedCall.cost_breakdown.tts.toFixed(5) : '—'"></p></div>
+                <div><p class="text-xs text-slate-500 mb-1">Telephony</p><p class="text-slate-300" x-text="selectedCall.cost_breakdown?.telephony ? '$' + selectedCall.cost_breakdown.telephony.toFixed(5) : '—'"></p></div>
+              </div>
+            </div>
+
+            <!-- Latency Metrics -->
+            <div class="bg-slate-900/60 rounded-xl p-4">
+              <h4 class="text-sm font-semibold text-slate-300 mb-3">Latency Metrics</h4>
+              <div class="grid grid-cols-3 gap-3 text-center">
+                <div><p class="text-xs text-slate-500 mb-1">Avg STT</p><p class="text-sky-400 font-medium" x-text="(selectedCall.latency_metrics?.avg_stt_ms || 0) + 'ms'"></p></div>
+                <div><p class="text-xs text-slate-500 mb-1">Avg LLM</p><p class="text-teal-400 font-medium" x-text="(selectedCall.latency_metrics?.avg_llm_ms || 0) + 'ms'"></p></div>
+                <div><p class="text-xs text-slate-500 mb-1">Avg TTS</p><p class="text-green-400 font-medium" x-text="(selectedCall.latency_metrics?.avg_tts_ms || 0) + 'ms'"></p></div>
+              </div>
+            </div>
+
+            <!-- Transcript -->
+            <div>
+              <h4 class="text-sm font-semibold text-slate-300 mb-3">Full Transcript</h4>
+              <div class="bg-slate-900/60 rounded-xl p-4 space-y-3 max-h-80 overflow-y-auto">
+                <template x-if="!selectedCall.transcript || selectedCall.transcript.length === 0">
+                  <p class="text-slate-500 text-sm text-center py-4">No transcript available</p>
+                </template>
+                <template x-for="(turn, idx) in (selectedCall.transcript || [])" :key="idx">
+                  <div :class="turn.role === 'patient' ? 'flex justify-end' : 'flex justify-start'">
+                    <div class="max-w-sm">
+                      <p class="text-xs text-slate-500 mb-1" :class="turn.role === 'patient' ? 'text-right' : 'text-left'" x-text="turn.role === 'patient' ? 'Patient' : 'AI'"></p>
+                      <div :class="turn.role === 'patient' ? 'bg-sky-500/20 text-sky-100' : 'bg-slate-700 text-slate-100'" class="rounded-xl px-4 py-2.5">
+                        <p :dir="(turn.is_rtl || ['ur', 'pa'].includes(selectedCall.language)) ? 'rtl' : 'ltr'" :class="(turn.is_rtl || ['ur', 'pa'].includes(selectedCall.language)) ? 'urdu-text text-sm' : 'text-sm'" x-text="turn.text"></p>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

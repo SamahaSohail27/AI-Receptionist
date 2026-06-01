@@ -1,0 +1,475 @@
+{% extends "base.html" %}
+{% block title %}Doctor Availability — AI Medical Receptionist{% endblock %}
+{% block page_title %}Doctor Availability{% endblock %}
+
+{% block content %}
+<div
+  x-data="{
+    doctorId: null,
+    doctor: null,
+    slots: [],
+    holidays: [],
+    blockedDates: [],
+    appointments: [],
+    loadingAppointments: true,
+    loading: true,
+    addSlotModal: false,
+    editSlotModal: false,
+    blockModal: false,
+    selectedSlot: null,
+    newSlot: { day_of_week: 0, start_time: '09:00', end_time: '17:00', slot_duration: 20 },
+    blockForm: { date: '', reason: '' },
+    saving: false,
+
+    days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+    dayShort: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    timeSlots: ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00'],
+
+    async init() {
+      const pathParts = location.pathname.split('/');
+      this.doctorId = pathParts[pathParts.indexOf('doctors') + 1];
+      await Promise.all([this.loadDoctor(), this.loadSlots(), this.loadHolidays(), this.loadBlockedDates(), this.loadAppointments()]);
+      this.loading = false;
+
+      document.addEventListener('ws-event', (e) => {
+        if (e.detail && e.detail.type === 'appointment.booked' && String(e.detail.doctor_id) === String(this.doctorId)) {
+          this.loadAppointments();
+        }
+      });
+    },
+
+    async loadAppointments() {
+      this.loadingAppointments = true;
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const dateFrom = `${yyyy}-${mm}-${dd}`;
+      const r = await $store.app.api(`/appointments?doctor_id=${this.doctorId}&date_from=${dateFrom}&page_size=50`);
+      if (r && r.ok) {
+        this.appointments = await r.json();
+      }
+      this.loadingAppointments = false;
+    },
+
+    apptPkt(iso) {
+      const d = new Date(iso);
+      return d.toLocaleString('en-PK', { timeZone: 'Asia/Karachi', year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    },
+
+    apptStatusClass(s) {
+      if (s === 'cancelled') return 'bg-red-500/20 text-red-400';
+      if (s === 'completed') return 'bg-slate-500/20 text-slate-400';
+      if (s === 'confirmed') return 'bg-emerald-500/20 text-emerald-400';
+      return 'bg-sky-500/20 text-sky-400';
+    },
+
+    async loadDoctor() {
+      const r = await $store.app.api('/doctors/' + this.doctorId);
+      if (r && r.ok) this.doctor = await r.json();
+    },
+
+    async loadSlots() {
+      const r = await $store.app.api('/doctors/' + this.doctorId + '/availability');
+      if (r && r.ok) {
+        const d = await r.json();
+        this.slots = d.slots || d || [];
+      }
+    },
+
+    async loadHolidays() {
+      const r = await $store.app.api('/clinic/holidays');
+      if (r && r.ok) {
+        const d = await r.json();
+        this.holidays = d.holidays || d || [];
+      }
+    },
+
+    async loadBlockedDates() {
+      const r = await $store.app.api('/doctors/' + this.doctorId + '/blocked-dates');
+      if (r && r.ok) {
+        const d = await r.json();
+        this.blockedDates = d.items || d || [];
+      }
+    },
+
+    slotsForDay(dayIdx) {
+      return this.slots.filter(s => s.day_of_week === dayIdx);
+    },
+
+    async addSlot() {
+      this.saving = true;
+      const r = await $store.app.api('/doctors/' + this.doctorId + '/availability', {
+        method: 'POST',
+        body: JSON.stringify(this.newSlot)
+      });
+      if (r && r.ok) {
+        const d = await r.json();
+        this.slots.push(d);
+        this.addSlotModal = false;
+        this.newSlot = { day_of_week: 0, start_time: '09:00', end_time: '17:00', slot_duration: 20 };
+        $store.app.addNotification('success', 'Availability slot added');
+      }
+      this.saving = false;
+    },
+
+    openEditSlot(slot) {
+      this.selectedSlot = { ...slot };
+      this.editSlotModal = true;
+    },
+
+    async updateSlot() {
+      this.saving = true;
+      const r = await $store.app.api('/doctors/' + this.doctorId + '/availability/' + this.selectedSlot.id, {
+        method: 'PUT',
+        body: JSON.stringify(this.selectedSlot)
+      });
+      if (r && r.ok) {
+        const idx = this.slots.findIndex(s => s.id === this.selectedSlot.id);
+        if (idx > -1) this.slots[idx] = { ...this.selectedSlot };
+        this.editSlotModal = false;
+        $store.app.addNotification('success', 'Slot updated');
+      }
+      this.saving = false;
+    },
+
+    async deleteSlot(id) {
+      if (!confirm('Delete this availability slot?')) return;
+      const r = await $store.app.api('/doctors/' + this.doctorId + '/availability/' + id, { method: 'DELETE' });
+      if (r && r.ok) {
+        this.slots = this.slots.filter(s => s.id !== id);
+        this.editSlotModal = false;
+        $store.app.addNotification('info', 'Slot deleted');
+      }
+    },
+
+    async addBlockedDate() {
+      this.saving = true;
+      const r = await $store.app.api('/doctors/' + this.doctorId + '/blocked-dates', {
+        method: 'POST',
+        body: JSON.stringify(this.blockForm)
+      });
+      if (r && r.ok) {
+        const d = await r.json();
+        this.blockedDates.push(d);
+        this.blockForm = { date: '', reason: '' };
+        this.blockModal = false;
+        $store.app.addNotification('success', 'Date blocked');
+      }
+      this.saving = false;
+    },
+
+    async removeBlockedDate(id) {
+      const r = await $store.app.api('/doctors/' + this.doctorId + '/blocked-dates/' + id, { method: 'DELETE' });
+      if (r && r.ok) {
+        this.blockedDates = this.blockedDates.filter(b => b.id !== id);
+        $store.app.addNotification('info', 'Block removed');
+      }
+    },
+
+    slotStyle(slot) {
+      return 'background-color: ' + (this.doctor?.calendar_color || '#0EA5E9') + '30; border-color: ' + (this.doctor?.calendar_color || '#0EA5E9') + '80;';
+    },
+
+    slotTextStyle() {
+      return 'color: ' + (this.doctor?.calendar_color || '#0EA5E9');
+    }
+  }"
+  class="space-y-6">
+
+  <!-- Doctor Header -->
+  <template x-if="doctor">
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <div class="w-14 h-14 rounded-full flex items-center justify-center text-white text-xl font-bold" :style="'background-color:' + (doctor.calendar_color || '#0EA5E9')" x-text="(doctor.name_en || doctor.name || 'DR').split(' ').map(w => w[0]).join('').substring(0,2).toUpperCase()"></div>
+        <div>
+          <h2 class="text-xl font-semibold text-slate-100" x-text="doctor.name_en || doctor.name || 'Doctor'"></h2>
+          <p class="text-slate-400 text-sm" x-text="(doctor.specialty || '') + (doctor.department ? ' · ' + doctor.department : '')"></p>
+        </div>
+      </div>
+      <div class="flex gap-3">
+        <button @click="blockModal = true" class="flex items-center gap-2 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+          Block Dates
+        </button>
+        <button @click="addSlotModal = true" class="flex items-center gap-2 bg-sky-500 hover:bg-sky-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Add Slot
+        </button>
+      </div>
+    </div>
+  </template>
+
+  <!-- Weekly Schedule Grid -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-700">
+      <h2 class="font-semibold text-slate-100">Weekly Schedule</h2>
+      <p class="text-slate-400 text-sm mt-0.5">Click on a day to add slots. Click a slot to edit.</p>
+    </div>
+
+    <!-- Skeleton -->
+    <template x-if="loading">
+      <div class="p-5">
+        <div class="grid grid-cols-7 gap-3">
+          <template x-for="i in 7" :key="i">
+            <div class="space-y-2">
+              <div class="h-8 rounded-lg skeleton"></div>
+              <div class="h-16 rounded-lg skeleton"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="!loading">
+      <div class="p-5 overflow-x-auto">
+        <div class="grid grid-cols-7 gap-3 min-w-[700px]">
+          <template x-for="(day, dayIdx) in days" :key="dayIdx">
+            <div class="space-y-2">
+              <!-- Day Header -->
+              <div class="text-center py-2 bg-slate-700/50 rounded-lg">
+                <p class="text-xs font-semibold text-slate-300 uppercase" x-text="dayShort[dayIdx]"></p>
+              </div>
+
+              <!-- Slots for this day -->
+              <div class="space-y-1.5 min-h-24">
+                <template x-for="slot in slotsForDay(dayIdx)" :key="slot.id">
+                  <div
+                    @click="openEditSlot(slot)"
+                    class="rounded-lg p-2 border cursor-pointer hover:opacity-80 transition-opacity"
+                    :style="slotStyle(slot)">
+                    <p class="text-xs font-semibold" :style="slotTextStyle()" x-text="slot.start_time + '–' + slot.end_time"></p>
+                    <p class="text-xs text-slate-400 mt-0.5" x-text="slot.slot_duration + 'min slots'"></p>
+                  </div>
+                </template>
+
+                <!-- Add button for empty day -->
+                <template x-if="slotsForDay(dayIdx).length === 0">
+                  <button @click="newSlot.day_of_week = dayIdx; addSlotModal = true" class="w-full h-16 rounded-lg border-2 border-dashed border-slate-600 hover:border-sky-500 hover:bg-sky-500/5 text-slate-600 hover:text-sky-400 transition-all flex items-center justify-center">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Upcoming Appointments Section -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+    <div class="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
+      <div>
+        <h2 class="font-semibold text-slate-100">Upcoming Appointments</h2>
+        <p class="text-slate-400 text-xs mt-0.5">From today onwards (PKT)</p>
+      </div>
+      <span class="text-xs text-slate-400 bg-slate-700 px-2 py-1 rounded-lg" x-text="appointments.length + ' booked'"></span>
+    </div>
+    <div class="p-5">
+      <template x-if="loadingAppointments">
+        <div class="space-y-2">
+          <template x-for="i in 3" :key="i">
+            <div class="h-12 rounded-lg skeleton"></div>
+          </template>
+        </div>
+      </template>
+      <template x-if="!loadingAppointments && appointments.length === 0">
+        <p class="text-slate-500 text-sm py-2">No upcoming appointments for this doctor.</p>
+      </template>
+      <template x-if="!loadingAppointments && appointments.length > 0">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700">
+                <th class="py-2 pr-4">Date / Time (PKT)</th>
+                <th class="py-2 pr-4">Patient ID</th>
+                <th class="py-2 pr-4">Type</th>
+                <th class="py-2 pr-4">Source</th>
+                <th class="py-2 pr-4">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="a in appointments" :key="a.id">
+                <tr class="border-b border-slate-800 hover:bg-slate-900/40">
+                  <td class="py-2 pr-4 text-slate-200" x-text="apptPkt(a.slot_start_utc)"></td>
+                  <td class="py-2 pr-4 text-slate-400" x-text="'#' + a.patient_id"></td>
+                  <td class="py-2 pr-4 text-slate-400" x-text="a.appointment_type"></td>
+                  <td class="py-2 pr-4 text-slate-400" x-text="a.booking_source"></td>
+                  <td class="py-2 pr-4">
+                    <span :class="apptStatusClass(a.status)" class="px-2 py-0.5 rounded text-xs font-medium" x-text="a.status"></span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Pakistani Holidays Section -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+    <div class="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
+      <h2 class="font-semibold text-slate-100">Pakistani Public Holidays</h2>
+      <span class="text-xs text-slate-400 bg-slate-700 px-2 py-1 rounded-lg">Read-only · Auto-imported</span>
+    </div>
+    <div class="p-5">
+      <template x-if="holidays.length === 0">
+        <p class="text-slate-500 text-sm">No holidays loaded</p>
+      </template>
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        <template x-for="h in holidays" :key="h.id || h.date">
+          <div class="bg-slate-900/60 rounded-lg p-3 flex items-center gap-3">
+            <div class="w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0"></div>
+            <div class="min-w-0">
+              <p class="text-slate-300 text-sm font-medium truncate" x-text="h.name"></p>
+              <p class="text-slate-500 text-xs" x-text="h.date"></p>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blocked Dates Section -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+    <div class="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
+      <h2 class="font-semibold text-slate-100">Blocked Dates</h2>
+      <button @click="blockModal = true" class="text-sky-400 hover:text-sky-300 text-sm font-medium transition-colors">+ Add Block</button>
+    </div>
+    <div class="p-5">
+      <template x-if="blockedDates.length === 0">
+        <p class="text-slate-500 text-sm">No dates blocked</p>
+      </template>
+      <div class="space-y-2">
+        <template x-for="b in blockedDates" :key="b.id">
+          <div class="flex items-center justify-between bg-slate-900/60 rounded-lg p-3">
+            <div class="flex items-center gap-3">
+              <svg class="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+              <div>
+                <p class="text-slate-300 text-sm font-medium" x-text="b.date"></p>
+                <p class="text-slate-500 text-xs" x-text="b.reason || 'No reason provided'"></p>
+              </div>
+            </div>
+            <button @click="removeBlockedDate(b.id)" class="text-slate-500 hover:text-red-400 transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Slot Modal -->
+  <div x-show="addSlotModal" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+    <div @click.away="addSlotModal = false" class="bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-md">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+        <h3 class="text-lg font-semibold text-slate-100">Add Availability Slot</h3>
+        <button @click="addSlotModal = false" class="text-slate-400 hover:text-slate-100"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1.5">Day of Week</label>
+          <select x-model.number="newSlot.day_of_week" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500">
+            <template x-for="(day, idx) in days" :key="idx">
+              <option :value="idx" x-text="day"></option>
+            </template>
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Start Time</label>
+            <input type="time" x-model="newSlot.start_time" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">End Time</label>
+            <input type="time" x-model="newSlot.end_time" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1.5">Slot Duration (minutes)</label>
+          <select x-model.number="newSlot.slot_duration" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500">
+            <option value="10">10 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="20">20 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="45">45 minutes</option>
+            <option value="60">60 minutes</option>
+          </select>
+        </div>
+      </div>
+      <div class="px-6 pb-6 flex gap-3">
+        <button @click="addSlotModal = false" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2.5 rounded-xl font-medium transition-colors">Cancel</button>
+        <button @click="addSlot" :disabled="saving" class="flex-1 bg-sky-500 hover:bg-sky-400 disabled:bg-sky-800 text-white py-2.5 rounded-xl font-medium transition-colors flex items-center justify-center gap-2">
+          <svg x-show="saving" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+          Add Slot
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Slot Modal -->
+  <div x-show="editSlotModal" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+    <div @click.away="editSlotModal = false" class="bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-md">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+        <h3 class="text-lg font-semibold text-slate-100">Edit Slot</h3>
+        <button @click="editSlotModal = false" class="text-slate-400 hover:text-slate-100"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <template x-if="selectedSlot">
+        <div class="p-6 space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Day</label>
+            <p class="text-slate-300 font-medium" x-text="days[selectedSlot.day_of_week]"></p>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1.5">Start Time</label>
+              <input type="time" x-model="selectedSlot.start_time" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1.5">End Time</label>
+              <input type="time" x-model="selectedSlot.end_time" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Slot Duration</label>
+            <select x-model.number="selectedSlot.slot_duration" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500">
+              <option value="10">10 min</option><option value="15">15 min</option><option value="20">20 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option>
+            </select>
+          </div>
+          <div class="flex gap-3">
+            <button @click="deleteSlot(selectedSlot.id)" class="flex-1 bg-red-500/20 hover:bg-red-500/40 text-red-400 py-2.5 rounded-xl font-medium transition-colors">Delete</button>
+            <button @click="updateSlot" :disabled="saving" class="flex-1 bg-sky-500 hover:bg-sky-400 text-white py-2.5 rounded-xl font-medium transition-colors">Save</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Block Date Modal -->
+  <div x-show="blockModal" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+    <div @click.away="blockModal = false" class="bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-sm">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+        <h3 class="text-lg font-semibold text-slate-100">Block Off Date</h3>
+        <button @click="blockModal = false" class="text-slate-400 hover:text-slate-100"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1.5">Date</label>
+          <input type="date" x-model="blockForm.date" class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1.5">Reason</label>
+          <input type="text" x-model="blockForm.reason" placeholder="e.g. Leave, Conference..." class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500 placeholder-slate-500" />
+        </div>
+      </div>
+      <div class="px-6 pb-6 flex gap-3">
+        <button @click="blockModal = false" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2.5 rounded-xl font-medium transition-colors">Cancel</button>
+        <button @click="addBlockedDate" :disabled="saving || !blockForm.date" class="flex-1 bg-yellow-500 hover:bg-yellow-400 disabled:bg-yellow-900 text-white py-2.5 rounded-xl font-medium transition-colors">Block Date</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

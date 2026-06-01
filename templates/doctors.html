@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}Doctors — AI Medical Receptionist{% endblock %}
+{% block page_title %}Doctors{% endblock %}
+
+{% block content %}
+<div
+  x-data="{
+    doctors: [],
+    loading: true,
+    selectedDoctor: null,
+    profileModal: false,
+    loadingToggle: null,
+    filterActive: 'all',
+
+    async init() {
+      await this.loadDoctors();
+    },
+
+    async loadDoctors() {
+      this.loading = true;
+      const qs = new URLSearchParams({ page_size: '100' });
+      if (this.filterActive !== 'all') qs.set('active', this.filterActive === 'active' ? 'true' : 'false');
+      const r = await $store.app.api('/doctors?' + qs.toString());
+      if (r && r.ok) {
+        const d = await r.json();
+        this.doctors = d.items || d || [];
+      }
+      this.loading = false;
+    },
+
+    async toggleActive(doctor) {
+      this.loadingToggle = doctor.id;
+      const r = await $store.app.api('/doctors/' + doctor.id, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: !doctor.is_active })
+      });
+      if (r && r.ok) {
+        doctor.is_active = !doctor.is_active;
+        $store.app.addNotification('success', 'Doctor status updated');
+      }
+      this.loadingToggle = null;
+    },
+
+    openProfile(doctor) {
+      this.selectedDoctor = { ...doctor };
+      this.profileModal = true;
+    },
+
+    avatarColor(color) {
+      return color || '#0EA5E9';
+    },
+
+    initials(name) {
+      if (!name) return 'DR';
+      return name.split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 2);
+    },
+
+    formatFee(fee) {
+      if (!fee) return '—';
+      return 'PKR ' + parseInt(fee).toLocaleString();
+    },
+
+    get filteredDoctors() {
+      if (this.filterActive === 'all') return this.doctors;
+      return this.doctors.filter(d => this.filterActive === 'active' ? d.is_active : !d.is_active);
+    }
+  }"
+  class="space-y-6">
+
+  <!-- Header Controls -->
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-2">
+      <button @click="filterActive = 'all'; loadDoctors()" :class="filterActive === 'all' ? 'bg-sky-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors">All</button>
+      <button @click="filterActive = 'active'; loadDoctors()" :class="filterActive === 'active' ? 'bg-green-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors">Active</button>
+      <button @click="filterActive = 'inactive'; loadDoctors()" :class="filterActive === 'inactive' ? 'bg-slate-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors">Inactive</button>
+    </div>
+    <span class="text-sm text-slate-400" x-text="filteredDoctors.length + ' doctors'"></span>
+  </div>
+
+  <!-- Skeleton Loader -->
+  <template x-if="loading">
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+      <template x-for="i in [1,2,3,4,5,6]" :key="i">
+        <div class="bg-slate-800 rounded-xl p-5 border border-slate-700 space-y-4">
+          <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-full skeleton flex-shrink-0"></div>
+            <div class="flex-1 space-y-2">
+              <div class="h-4 rounded skeleton w-2/3"></div>
+              <div class="h-3 rounded skeleton w-1/2"></div>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <div class="h-3 rounded skeleton"></div>
+            <div class="h-3 rounded skeleton w-3/4"></div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- Doctors Grid -->
+  <template x-if="!loading">
+    <div>
+      <template x-if="filteredDoctors.length === 0">
+        <div class="text-center py-16 text-slate-400 bg-slate-800 rounded-xl border border-slate-700">
+          <svg class="w-12 h-12 mx-auto text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          <p>No doctors found</p>
+        </div>
+      </template>
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        <template x-for="doc in filteredDoctors" :key="doc.id">
+          <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden hover:border-sky-500/50 transition-colors group">
+
+            <!-- Card Header with Avatar -->
+            <div class="p-5">
+              <div class="flex items-start justify-between mb-4">
+                <div class="flex items-center gap-4">
+                  <div class="w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-bold flex-shrink-0 shadow-lg" :style="'background-color:' + avatarColor(doc.calendar_color)" x-text="initials(doc.name_en || doc.name)"></div>
+                  <div>
+                    <h3 class="text-slate-100 font-semibold text-base" x-text="doc.name_en || doc.name || '—'"></h3>
+                    <template x-if="doc.name_ur">
+                      <p class="urdu-text text-slate-400 text-sm" x-text="doc.name_ur"></p>
+                    </template>
+                  </div>
+                </div>
+                <!-- Active Toggle -->
+                <button
+                  @click.stop="toggleActive(doc)"
+                  :disabled="loadingToggle === doc.id"
+                  class="relative flex-shrink-0 mt-1">
+                  <div :class="doc.is_active ? 'bg-green-500' : 'bg-slate-600'" class="w-11 h-6 rounded-full transition-colors cursor-pointer">
+                    <div :class="doc.is_active ? 'translate-x-6' : 'translate-x-1'" class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"></div>
+                  </div>
+                </button>
+              </div>
+
+              <!-- Details -->
+              <div class="space-y-2.5">
+                <template x-if="doc.specialty">
+                  <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                    <span class="text-slate-300 text-sm" x-text="doc.specialty"></span>
+                  </div>
+                </template>
+                <template x-if="doc.department">
+                  <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                    <span class="text-slate-400 text-sm" x-text="doc.department"></span>
+                  </div>
+                </template>
+                <template x-if="doc.room_number">
+                  <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>
+                    <span class="text-slate-400 text-sm">Room <span x-text="doc.room_number"></span></span>
+                  </div>
+                </template>
+                <div class="flex items-center gap-2">
+                  <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span class="text-slate-400 text-sm" x-text="formatFee(doc.consultation_fee)"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card Footer -->
+            <div class="px-5 pb-5 flex gap-2">
+              <button @click="openProfile(doc)" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2 rounded-lg text-sm font-medium transition-colors">View Profile</button>
+              <a :href="'/doctors/' + doc.id + '/availability'" class="flex-1 bg-sky-500/20 hover:bg-sky-500/30 text-sky-400 py-2 rounded-lg text-sm font-medium transition-colors text-center">Availability</a>
+            </div>
+
+          </div>
+        </template>
+      </div>
+    </div>
+  </template>
+
+  <!-- Doctor Profile Modal -->
+  <div x-show="profileModal" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+    <div @click.away="profileModal = false" class="bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-lg">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+        <h3 class="text-lg font-semibold text-slate-100">Doctor Profile</h3>
+        <button @click="profileModal = false" class="text-slate-400 hover:text-slate-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <template x-if="selectedDoctor">
+        <div class="p-6 space-y-5">
+          <!-- Avatar + Name -->
+          <div class="flex items-center gap-5">
+            <div class="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 shadow-lg" :style="'background-color:' + avatarColor(selectedDoctor.calendar_color)" x-text="initials(selectedDoctor.name_en || selectedDoctor.name)"></div>
+            <div>
+              <h4 class="text-xl font-semibold text-slate-100" x-text="selectedDoctor.name_en || selectedDoctor.name || '—'"></h4>
+              <template x-if="selectedDoctor.name_ur">
+                <p class="urdu-text text-slate-400" x-text="selectedDoctor.name_ur"></p>
+              </template>
+              <div class="flex items-center gap-2 mt-1">
+                <div :class="selectedDoctor.is_active ? 'bg-green-500' : 'bg-slate-500'" class="w-2 h-2 rounded-full"></div>
+                <span class="text-xs text-slate-400" x-text="selectedDoctor.is_active ? 'Active' : 'Inactive'"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Details Grid -->
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div class="bg-slate-900/60 rounded-xl p-3">
+              <p class="text-xs text-slate-500 mb-1">Specialty</p>
+              <p class="text-slate-300" x-text="selectedDoctor.specialty || '—'"></p>
+            </div>
+            <div class="bg-slate-900/60 rounded-xl p-3">
+              <p class="text-xs text-slate-500 mb-1">Department</p>
+              <p class="text-slate-300" x-text="selectedDoctor.department || '—'"></p>
+            </div>
+            <div class="bg-slate-900/60 rounded-xl p-3">
+              <p class="text-xs text-slate-500 mb-1">Room</p>
+              <p class="text-slate-300" x-text="selectedDoctor.room_number || '—'"></p>
+            </div>
+            <div class="bg-slate-900/60 rounded-xl p-3">
+              <p class="text-xs text-slate-500 mb-1">Consultation Fee</p>
+              <p class="text-slate-300" x-text="formatFee(selectedDoctor.consultation_fee)"></p>
+            </div>
+            <div class="bg-slate-900/60 rounded-xl p-3">
+              <p class="text-xs text-slate-500 mb-1">Phone</p>
+              <p class="text-slate-300 font-mono" x-text="selectedDoctor.phone || '—'"></p>
+            </div>
+            <div class="bg-slate-900/60 rounded-xl p-3">
+              <p class="text-xs text-slate-500 mb-1">Language Override</p>
+              <p class="text-slate-300" x-text="selectedDoctor.language_override || 'Auto'"></p>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 pt-2">
+            <a :href="'/doctors/' + selectedDoctor.id + '/availability'" class="flex-1 bg-sky-500 hover:bg-sky-400 text-white py-2.5 rounded-xl font-medium transition-colors text-center text-sm">Set Availability</a>
+            <button @click="profileModal = false" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2.5 rounded-xl font-medium transition-colors text-sm">Close</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

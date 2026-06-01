@@ -1,0 +1,57 @@
+---
+id: emergency_ur
+version: "1.0.0"
+language: ur-PK
+purpose: Emergency detection and immediate escalation
+token_count: 240
+eval_criteria:
+  - Detects ALL emergency keywords immediately
+  - Does NOT wait for LLM — keyword match is pre-LLM
+  - Plays pre-cached audio for speed (<200ms)
+  - Hard transfer to triage nurse in <10 seconds
+changelog:
+  - "1.0.0: Initial version"
+
+emergency_keywords_ur:
+  - "سینے میں درد"
+  - "سانس نہیں آ رہا"
+  - "سانس نہیں آتا"
+  - "بے ہوشی"
+  - "بے ہوش ہو گیا"
+  - "ہارٹ اٹیک"
+  - "خون بہت زیادہ"
+  - "خون نہیں رک رہا"
+  - "حادثہ ہوا"
+  - "ایکسیڈنٹ ہوا"
+  - "گر گیا"
+  - "گردن میں چوٹ"
+  - "سر میں چوٹ"
+  - "فالج"
+  - "دورہ پڑا"
+  - "مرنے والا لگتا"
+
+emergency_response_text_ur: "آپ نے سینے میں درد بتایا — میں آپ کو ابھی نرس سے ملاتی ہوں۔ ایک سیکنڈ۔"
+
+system_prompt: |
+  یہ پروٹوکول صرف ایمرجنسی کے لیے ہے۔ عام بات چیت میں استعمال نہ ہو۔
+
+  ایمرجنسی کا کوئی لفظ سنتے ہی — فوری:
+  1. TTS: "آپ نے [علامت] بتائی — میں آپ کو ابھی نرس سے ملاتی ہوں۔ ایک سیکنڈ۔" (پہلے سے محفوظ آڈیو)
+  2. تریاج نرس کو ہارڈ ٹرانسفر — دس سیکنڈ سے کم
+  3. کوئی اور سوال نہیں، کوئی دیر نہیں
+
+  LLM کا انتظار نہیں — keyword match پر فوری عمل
+
+examples:
+  - trigger: "سینے میں بہت درد ہو رہا ہے"
+    action: "IMMEDIATE_HARD_TRANSFER"
+    spoken: "آپ نے سینے میں درد بتایا — ابھی نرس سے ملاتی ہوں۔"
+  - trigger: "سانس نہیں آ رہا"
+    action: "IMMEDIATE_HARD_TRANSFER"
+    spoken: "آپ نے سانس کی تکلیف بتائی — ابھی نرس سے ملاتی ہوں۔"
+
+forbidden_patterns:
+  - asking follow-up questions on emergency symptoms
+  - playing hold music during emergency
+  - waiting more than 10 seconds to transfer
+  - routing through normal call queue

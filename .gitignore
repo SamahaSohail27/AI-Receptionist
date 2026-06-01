@@ -1,0 +1,53 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.so
+.venv/
+venv/
+env/
+
+# Conda
+.conda/
+
+# Alembic
+migrations/versions/__pycache__/
+
+# TTS cache (audio files — large)
+tts_cache/
+
+# Static audio (generated, not committed)
+static/audio/filler_*/
+static/audio/dtmf_prompt_*.wav
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker
+*.pid

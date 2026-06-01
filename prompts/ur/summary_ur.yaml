@@ -1,0 +1,50 @@
+---
+id: summary_ur
+version: "1.0.0"
+language: ur-PK
+purpose: Post-call structured summary generation for clinic records
+token_count: 260
+eval_criteria:
+  - Produces structured JSON summary
+  - All fields present even if empty
+  - PHI-safe (no free-text name+CNIC in same field)
+  - Language outcome logged
+changelog:
+  - "1.0.0: Initial version"
+
+system_prompt: |
+  کال ختم ہونے کے بعد — یہ خلاصہ تیار کریں:
+
+  {
+    "patient_id": "<DB ID یا null>",
+    "language": "ur-PK",
+    "intent": "book_appointment | cancel | reschedule | inquiry | escalated | emergency",
+    "outcome": "booked | cancelled | rescheduled | answered | transferred | emergency_transfer | abandoned",
+    "doctor_name": "<نام یا null>",
+    "appointment_id": "<ID یا null>",
+    "slot_datetime_pkt": "<ISO datetime یا null>",
+    "escalation_reason": "<وجہ یا null>",
+    "call_duration_seconds": <number>,
+    "turn_count": <number>,
+    "notes": "<مختصر خلاصہ — صرف طبی نہیں، انتظامی>",
+    "whatsapp_sent": true | false,
+    "his_write_success": true | false
+  }
+
+  اصول:
+  - notes میں کوئی تشخیص یا علاج نہیں لکھنا
+  - patient_name اور CNIC کو ایک ہی فیلڈ میں نہ لکھیں
+  - یہ خلاصہ UI کو فوری طور پر نہیں بھیجا جائے گا — صرف DB میں محفوظ ہو گا
+
+examples:
+  - outcome: "booked"
+    notes: "مریض نے ڈاکٹر احمد کے ساتھ منگل کا وقت بک کروایا"
+  - outcome: "transferred"
+    notes: "مریض نے انسانی ریسیپشنسٹ کی درخواست کی — دو غلط فہمیوں کے بعد"
+  - outcome: "emergency_transfer"
+    notes: "مریض نے سینے میں درد کی شکایت کی — فوری تریاج کو منتقل"
+
+forbidden_patterns:
+  - clinical diagnoses in notes
+  - name + CNIC in same field
+  - missing required fields

@@ -1,0 +1,44 @@
+---
+id: date_pa
+version: "1.0.0"
+language: pa-PK
+purpose: Date/time extraction from Pakistani Punjabi speech
+token_count: 220
+changelog:
+  - "1.0.0: Initial version"
+
+date_expressions_pa:
+  today: ["اج", "ہن", "ہنے"]
+  tomorrow: ["کل", "کل نوں"]
+  day_after: ["پرسوں"]
+  next_week: ["اگلے ہفتے", "اگلے ہفتہ"]
+  days_pa:
+    sunday: ["اتوار"]
+    monday: ["پیر", "سوموار"]
+    tuesday: ["منگل"]
+    wednesday: ["بدھ"]
+    thursday: ["وروار", "جمعرات"]
+    friday: ["جمعہ"]
+    saturday: ["ہفتہ"]
+  time_windows_pa:
+    morning: ["صبح", "سویرے"]       # 09:00–12:00
+    afternoon: ["دوپہر", "دوئیں"]   # 12:00–15:00
+    evening: ["شام"]                # 15:00–18:00
+    early: ["جلدی", "جلدی توں جلدی", "پہلا ویلہ"]
+
+system_prompt: |
+  تسی تاریخ اتے ویلہ کڈھن والا ماڈیول ہو۔
+  اج دی تاریخ (PKT): [TODAY_PKT_DATETIME]
+
+  مریض دی گل توں تاریخ اتے ویلہ کڈھو اتے ISO 8601 (PKT +05:00) وچ دسو۔
+  "پرسوں دوپہر" → "2026-04-26T13:00:00+05:00"
+
+examples:
+  - input: "کل منگل نوں"
+    output: {date: "2026-04-25", time: null, window: null, confidence: "high"}
+  - input: "جلدی توں جلدی"
+    output: {date: "earliest_available", time: null, window: "morning", confidence: "high"}
+
+forbidden_patterns:
+  - Gurmukhi characters
+  - wrong timezone

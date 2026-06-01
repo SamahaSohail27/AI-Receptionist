@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — AI Medical Receptionist</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .urdu-text { font-family: 'Noto Nastaliq Urdu', serif; line-height: 2.2; direction: rtl; }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+    .float-anim { animation: float 3s ease-in-out infinite; }
+    @keyframes pulse-ring {
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+    .pulse-ring::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 9999px;
+      background: #0EA5E9;
+      animation: pulse-ring 1.5s ease-out infinite;
+    }
+  </style>
+  <script>
+    tailwind.config = { darkMode: 'class' }
+  </script>
+</head>
+<body class="bg-slate-900 min-h-screen flex items-center justify-center p-4">
+
+  <!-- Background gradient blobs -->
+  <div class="fixed inset-0 overflow-hidden pointer-events-none">
+    <div class="absolute -top-40 -right-40 w-96 h-96 bg-sky-500 rounded-full opacity-5 blur-3xl"></div>
+    <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-teal-500 rounded-full opacity-5 blur-3xl"></div>
+  </div>
+
+  <div
+    x-data="{
+      email: '',
+      password: '',
+      loading: false,
+      error: '',
+      store: null,
+
+      async init() {
+        // Re-init the store inline since this page doesn't use base.html
+        this.store = {
+          token: localStorage.getItem('token') || '',
+          async login(email, password) {
+            const resp = await fetch('/api/v1/auth/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: 'username=' + encodeURIComponent(email) + '&password=' + encodeURIComponent(password)
+            });
+            if (resp.ok) {
+              const data = await resp.json();
+              localStorage.setItem('token', data.access_token);
+              localStorage.setItem('user', JSON.stringify({ id: data.user_id, role: data.role, name: data.name || email }));
+              return true;
+            }
+            return false;
+          }
+        };
+        if (this.store.token) location.href = '/';
+      },
+
+      async submit() {
+        if (!this.email || !this.password) { this.error = 'Please enter email and password.'; return; }
+        this.loading = true;
+        this.error = '';
+        try {
+          const ok = await this.store.login(this.email, this.password);
+          if (ok) {
+            location.href = '/';
+          } else {
+            this.error = 'Invalid credentials. Please try again.';
+          }
+        } catch(e) {
+          this.error = 'Connection error. Please check your network.';
+        } finally {
+          this.loading = false;
+        }
+      }
+    }"
+    class="relative w-full max-w-md">
+
+    <!-- Login Card -->
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl p-8">
+
+      <!-- Logo -->
+      <div class="flex flex-col items-center mb-8">
+        <div class="relative w-20 h-20 mb-4 float-anim">
+          <div class="pulse-ring relative w-20 h-20 bg-sky-500 rounded-full flex items-center justify-center shadow-lg shadow-sky-500/30">
+            <svg class="w-10 h-10 text-white relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+            </svg>
+          </div>
+        </div>
+        <h1 class="text-2xl font-bold text-slate-100 mb-1">AI Medical Receptionist</h1>
+        <p class="urdu-text text-lg text-sky-400 text-center w-full">اے آئی ریسپشنسٹ</p>
+        <p class="text-slate-400 text-sm mt-2">Clinic Management Portal</p>
+      </div>
+
+      <!-- Form -->
+      <form @submit.prevent="submit" class="space-y-5">
+
+        <!-- Email -->
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-2">Email Address</label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"/>
+              </svg>
+            </div>
+            <input
+              type="email"
+              x-model="email"
+              @keydown.enter="submit"
+              placeholder="admin@clinic.pk"
+              class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 placeholder-slate-500 transition-colors"
+            />
+          </div>
+        </div>
+
+        <!-- Password -->
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-2">Password</label>
+          <div x-data="{ show: false }" class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+              </svg>
+            </div>
+            <input
+              :type="show ? 'text' : 'password'"
+              x-model="password"
+              @keydown.enter="submit"
+              placeholder="••••••••"
+              class="w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-xl pl-10 pr-12 py-3 text-sm focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 placeholder-slate-500 transition-colors"
+            />
+            <button type="button" @click="show = !show" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300">
+              <svg x-show="!show" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+              <svg x-show="show" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Error Message -->
+        <div x-show="error" x-transition class="flex items-center gap-2 bg-red-900/40 border border-red-500/50 rounded-xl px-4 py-3">
+          <svg class="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+          <p class="text-red-300 text-sm" x-text="error"></p>
+        </div>
+
+        <!-- Submit Button -->
+        <button
+          type="submit"
+          :disabled="loading"
+          class="w-full bg-sky-500 hover:bg-sky-400 disabled:bg-sky-800 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl transition-colors text-sm flex items-center justify-center gap-2 shadow-lg shadow-sky-500/20">
+          <!-- Loading Spinner -->
+          <svg x-show="loading" class="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span x-text="loading ? 'Signing in...' : 'Sign In'"></span>
+        </button>
+      </form>
+
+      <!-- Footer -->
+      <div class="mt-6 pt-6 border-t border-slate-700 text-center">
+        <p class="text-slate-500 text-xs">AI Medical Receptionist &copy; 2024 &mdash; Clinical Portal</p>
+        <p class="urdu-text text-slate-500 text-sm mt-1">طبی ریسیپشنسٹ</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+{% block title %}Analytics — AI Medical Receptionist{% endblock %}
+{% block page_title %}Analytics{% endblock %}
+
+{% block content %}
+<div
+  x-data="{
+    period: '7d',
+    loading: false,
+    charts: {},
+    summary: {},
+    costBreakdown: [],
+    peakHours: [],
+
+    async init() {
+      await this.loadAll();
+      document.addEventListener('ws-event', (e) => {
+        if (e.detail.type === 'call.ended') this.loadAll();
+      });
+    },
+
+    async loadAll() {
+      this.loading = true;
+      await Promise.all([
+        this.loadSummary(),
+        this.loadVolume(),
+        this.loadLanguage(),
+        this.loadOutcomes(),
+        this.loadLatency(),
+        this.loadCost(),
+        this.loadPeakHours(),
+        this.loadSTTErrors()
+      ]);
+      this.loading = false;
+    },
+
+    async loadSummary() {
+      const r = await $store.app.api('/analytics/summary?period=' + this.period);
+      if (r && r.ok) this.summary = await r.json();
+    },
+
+    async loadVolume() {
+      const r = await $store.app.api('/analytics/calls/volume?days=' + (this.period === '7d' ? 7 : this.period === '30d' ? 30 : 90));
+      if (r && r.ok) {
+        const d = await r.json();
+        if (this.charts.volume) {
+          this.charts.volume.data.labels = d.labels || [];
+          this.charts.volume.data.datasets[0].data = d.values || [];
+          this.charts.volume.update();
+        } else {
+          this.$nextTick(() => {
+            const ctx = document.getElementById('volumeChart');
+            if (ctx) this.charts.volume = new Chart(ctx, {
+              type: 'bar',
+              data: { labels: d.labels || [], datasets: [{ label: 'Calls', data: d.values || [], backgroundColor: 'rgba(14,165,233,0.7)', borderColor: '#0EA5E9', borderWidth: 1, borderRadius: 4 }] },
+              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' }, beginAtZero: true } } }
+            });
+          });
+        }
+      }
+    },
+
+    async loadLanguage() {
+      const r = await $store.app.api('/analytics/calls/language-distribution');
+      if (r && r.ok) {
+        const d = await r.json();
+        if (this.charts.lang) {
+          this.charts.lang.data.datasets[0].data = d.values || [];
+          this.charts.lang.update();
+        } else {
+          this.$nextTick(() => {
+            const ctx = document.getElementById('langChart');
+            if (ctx) this.charts.lang = new Chart(ctx, {
+              type: 'doughnut',
+              data: { labels: d.labels || ['Urdu','Punjabi','English'], datasets: [{ data: d.values || [0,0,0], backgroundColor: ['#0EA5E9','#22C55E','#14B8A6'], borderColor: '#1e293b', borderWidth: 2 }] },
+              options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { labels: { color: '#94a3b8' } } } }
+            });
+          });
+        }
+      }
+    },
+
+    async loadOutcomes() {
+      const r = await $store.app.api('/analytics/calls/outcomes?period=' + this.period);
+      if (r && r.ok) {
+        const d = await r.json();
+        if (this.charts.outcomes) {
+          this.charts.outcomes.data.datasets[0].data = d.values || [];
+          this.charts.outcomes.update();
+        } else {
+          this.$nextTick(() => {
+            const ctx = document.getElementById('outcomesChart');
+            if (ctx) this.charts.outcomes = new Chart(ctx, {
+              type: 'pie',
+              data: {
+                labels: d.labels || ['Booked','Escalated','Abandoned','Info Only'],
+                datasets: [{ data: d.values || [0,0,0,0], backgroundColor: ['#22C55E','#F59E0B','#EF4444','#94a3b8'], borderColor: '#1e293b', borderWidth: 2 }]
+              },
+              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' }, position: 'bottom' } } }
+            });
+          });
+        }
+      }
+    },
+
+    async loadLatency() {
+      const r = await $store.app.api('/analytics/latency/breakdown?period=' + this.period);
+      if (r && r.ok) {
+        const d = await r.json();
+        if (this.charts.latency) {
+          this.charts.latency.data.labels = d.labels || [];
+          this.charts.latency.data.datasets.forEach((ds, i) => { ds.data = d.datasets?.[i]?.data || []; });
+          this.charts.latency.update();
+        } else {
+          this.$nextTick(() => {
+            const ctx = document.getElementById('latencyChart');
+            if (ctx) this.charts.latency = new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: d.labels || [],
+                datasets: [
+                  { label: 'STT', data: d.datasets?.[0]?.data || [], borderColor: '#22C55E', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.4, fill: false },
+                  { label: 'LLM', data: d.datasets?.[1]?.data || [], borderColor: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.1)', tension: 0.4, fill: false },
+                  { label: 'TTS', data: d.datasets?.[2]?.data || [], borderColor: '#14B8A6', backgroundColor: 'rgba(20,184,166,0.1)', tension: 0.4, fill: false }
+                ]
+              },
+              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' }, title: { display: true, text: 'ms', color: '#64748b' } } } }
+            });
+          });
+        }
+      }
+    },
+
+    async loadCost() {
+      const r = await $store.app.api('/analytics/costs/breakdown?period=' + this.period);
+      if (r && r.ok) {
+        const d = await r.json();
+        this.costBreakdown = d.providers || [];
+        if (this.charts.cost) {
+          this.charts.cost.data.labels = d.labels || [];
+          this.charts.cost.data.datasets[0].data = d.values || [];
+          this.charts.cost.update();
+        } else {
+          this.$nextTick(() => {
+            const ctx = document.getElementById('costChart');
+            if (ctx) this.charts.cost = new Chart(ctx, {
+              type: 'bar',
+              data: {
+                labels: d.labels || [],
+                datasets: [{ label: 'USD', data: d.values || [], backgroundColor: ['rgba(168,85,247,0.7)','rgba(14,165,233,0.7)','rgba(20,184,166,0.7)','rgba(34,197,94,0.7)'], borderRadius: 4 }]
+              },
+              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' }, beginAtZero: true } } }
+            });
+          });
+        }
+      }
+    },
+
+    async loadPeakHours() {
+      const r = await $store.app.api('/analytics/calls/peak-hours');
+      if (r && r.ok) {
+        const d = await r.json();
+        this.peakHours = d.hours || [];
+        if (this.charts.peak) {
+          this.charts.peak.data.labels = d.labels || [];
+          this.charts.peak.data.datasets[0].data = d.values || [];
+          this.charts.peak.update();
+        } else {
+          this.$nextTick(() => {
+            const ctx = document.getElementById('peakChart');
+            if (ctx) this.charts.peak = new Chart(ctx, {
+              type: 'bar',
+              data: {
+                labels: d.labels || [],
+                datasets: [{ label: 'Calls', data: d.values || [], backgroundColor: 'rgba(249,115,22,0.7)', borderRadius: 3 }]
+              },
+              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#94a3b8', maxRotation: 0 }, grid: { color: '#1e293b' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' }, beginAtZero: true } } }
+            });
+          });
+        }
+      }
+    },
+
+    async loadSTTErrors() {
+      const r = await $store.app.api('/analytics/stt/error-rate?period=' + this.period);
+      if (r && r.ok) {
+        const d = await r.json();
+        if (this.charts.stt) {
+          this.charts.stt.data.labels = d.labels || [];
+          this.charts.stt.data.datasets[0].data = d.values || [];
+          this.charts.stt.update();
+        } else {
+          this.$nextTick(() => {
+            const ctx = document.getElementById('sttChart');
+            if (ctx) this.charts.stt = new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: d.labels || [],
+                datasets: [{ label: 'STT Error %', data: d.values || [], borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.4, fill: true }]
+              },
+              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } }, y: { ticks: { color: '#94a3b8', callback: v => v+'%' }, grid: { color: '#1e293b' }, beginAtZero: true } } }
+            });
+          });
+        }
+      }
+    },
+
+    fmt(val, decimals=1) { return val != null ? Number(val).toFixed(decimals) : '—'; }
+  }"
+  class="space-y-6">
+
+  <!-- Period Selector + KPIs -->
+  <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+    <div class="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl p-1">
+      <button @click="period='7d'; loadAll()" :class="period==='7d' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:text-slate-100'" class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors">7 Days</button>
+      <button @click="period='30d'; loadAll()" :class="period==='30d' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:text-slate-100'" class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors">30 Days</button>
+      <button @click="period='90d'; loadAll()" :class="period==='90d' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:text-slate-100'" class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors">90 Days</button>
+    </div>
+    <div x-show="loading" class="text-xs text-slate-400 flex items-center gap-2">
+      <svg class="w-4 h-4 animate-spin text-sky-400" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      Refreshing...
+    </div>
+  </div>
+
+  <!-- KPI Summary Cards -->
+  <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4">
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700 col-span-2 sm:col-span-1">
+      <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Total Calls</p>
+      <p class="text-2xl font-bold text-slate-100" x-text="summary.total_calls ?? '—'"></p>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Booking Rate</p>
+      <p class="text-2xl font-bold text-green-400" x-text="fmt(summary.booking_rate) + '%'"></p>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Escalation Rate</p>
+      <p class="text-2xl font-bold text-yellow-400" x-text="fmt(summary.escalation_rate) + '%'"></p>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Abandon Rate</p>
+      <p class="text-2xl font-bold text-red-400" x-text="fmt(summary.abandonment_rate) + '%'"></p>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Avg Duration</p>
+      <p class="text-2xl font-bold text-slate-100" x-text="summary.avg_duration_secs ? Math.round(summary.avg_duration_secs) + 's' : '—'"></p>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">P95 Latency</p>
+      <p class="text-2xl font-bold text-sky-400" x-text="summary.p95_latency_ms ? summary.p95_latency_ms + 'ms' : '—'"></p>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Cost/Call</p>
+      <p class="text-2xl font-bold text-purple-400" x-text="'$' + fmt(summary.cost_per_call, 3)"></p>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Total Cost</p>
+      <p class="text-2xl font-bold text-slate-100" x-text="'$' + fmt(summary.total_cost, 2)"></p>
+    </div>
+  </div>
+
+  <!-- Charts Row 1: Volume + Language + Outcomes -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold text-slate-100 mb-4">Call Volume</h2>
+      <div class="h-56"><canvas id="volumeChart"></canvas></div>
+    </div>
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold text-slate-100 mb-4">Language Split</h2>
+      <div class="h-56"><canvas id="langChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Charts Row 2: Outcomes + Latency -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold text-slate-100 mb-4">Call Outcomes</h2>
+      <div class="h-56"><canvas id="outcomesChart"></canvas></div>
+    </div>
+    <div class="lg:col-span-2 bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold text-slate-100 mb-4">Latency Breakdown (STT / LLM / TTS)</h2>
+      <div class="h-56"><canvas id="latencyChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Charts Row 3: Peak Hours + STT Error Rate -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold text-slate-100 mb-4">Peak Call Hours (PKT)</h2>
+      <div class="h-48"><canvas id="peakChart"></canvas></div>
+    </div>
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold text-slate-100 mb-4">STT Error Rate</h2>
+      <div class="h-48"><canvas id="sttChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Cost Chart + Provider Breakdown Table -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold text-slate-100 mb-4">Cost by Provider</h2>
+      <div class="h-48"><canvas id="costChart"></canvas></div>
+    </div>
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold text-slate-100 mb-4">Provider Cost Breakdown</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700">
+              <th class="pb-2">Provider</th>
+              <th class="pb-2 text-right">Calls</th>
+              <th class="pb-2 text-right">Cost (USD)</th>
+              <th class="pb-2 text-right">Per Call</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-700/50">
+            <template x-if="costBreakdown.length === 0">
+              <tr><td colspan="4" class="text-center text-slate-500 py-8 text-sm">No data for selected period</td></tr>
+            </template>
+            <template x-for="row in costBreakdown" :key="row.provider">
+              <tr class="hover:bg-slate-700/30 transition-colors">
+                <td class="py-2.5 text-slate-200 font-medium" x-text="row.provider"></td>
+                <td class="py-2.5 text-right text-slate-400" x-text="row.calls"></td>
+                <td class="py-2.5 text-right text-purple-400 font-mono" x-text="'$' + Number(row.cost).toFixed(4)"></td>
+                <td class="py-2.5 text-right text-slate-400 font-mono" x-text="'$' + Number(row.per_call || 0).toFixed(4)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}

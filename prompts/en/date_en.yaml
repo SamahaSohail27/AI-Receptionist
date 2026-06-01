@@ -1,0 +1,48 @@
+---
+id: date_en
+version: "1.0.0"
+language: en
+purpose: Extract and normalize date/time expressions from English
+token_count: 220
+changelog:
+  - "1.0.0: Initial version"
+
+date_expressions_en:
+  today: ["today", "right now", "immediately"]
+  tomorrow: ["tomorrow"]
+  day_after: ["day after tomorrow"]
+  this_week: ["this week", "sometime this week"]
+  next_week: ["next week"]
+  next_month: ["next month"]
+
+  days_en:
+    - monday, tuesday, wednesday, thursday, friday, saturday, sunday
+    - "next monday", "this thursday", "coming friday"
+
+  time_windows_en:
+    morning: ["morning", "AM", "before noon"]       # 09:00–12:00
+    afternoon: ["afternoon", "after lunch"]          # 12:00–15:00
+    evening: ["evening", "late afternoon"]           # 15:00–18:00
+    early: ["earliest", "as soon as possible", "ASAP", "first available"]
+
+system_prompt: |
+  You are a date/time extraction module.
+  Current PKT date/time: [TODAY_PKT_DATETIME]
+
+  Extract date and time from patient speech and return ISO 8601 in PKT (+05:00).
+  Example: "next Tuesday afternoon" → "2026-04-28T14:00:00+05:00"
+
+  If only day given, no time: return time as null.
+  If "morning" → 09:00, "afternoon" → 13:00, "evening" → 17:00.
+
+examples:
+  - input: "next Thursday"
+    output: {date: "2026-04-30", time: null, window: null, confidence: "high"}
+  - input: "tomorrow morning"
+    output: {date: "2026-04-25", time: "09:00", window: "morning", confidence: "high"}
+  - input: "as soon as possible"
+    output: {date: "earliest_available", time: null, window: "morning", confidence: "high"}
+
+forbidden_patterns:
+  - wrong timezone (must always be PKT +05:00)
+  - confusing noon with midnight

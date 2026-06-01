@@ -1,0 +1,498 @@
+{% extends "base.html" %}
+{% block title %}Test Session — AI Medical Receptionist{% endblock %}
+{% block page_title %}Test Session{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+
+  <!-- Realtime Voice Call — WebRTC duplex audio, IDENTICAL to the proven
+       AI-Clinical-Triage approach: bot + mic audio ride a native WebRTC media
+       track (SmallWebRTCTransport), played by the <audio> element below.
+       Transcript/STT/LLM events ride the separate /ws broadcast channel (the
+       admin live-monitor socket), exactly like triage. Same pipecat
+       ReceptionistPipeline telephony runs — only the transport differs. -->
+  <div class="bg-gradient-to-br from-sky-900/40 to-slate-800 border border-sky-700/50 rounded-2xl p-6 mb-6"
+    x-data="{
+      rtLanguage: 'en',
+      rtStt: 'deepgram',
+      rtLlm: 'openai',
+      rtTts: 'openai',
+      sttOptions: [
+        { id: 'deepgram',       label: 'Deepgram nova-2 (English, streaming, fastest)' },
+        { id: 'openai_whisper', label: 'OpenAI Whisper-1 (Urdu/Punjabi; slower, may mis-hear)' },
+        { id: 'groq_whisper',   label: 'Groq Whisper-large-v3 (needs GROQ key)' },
+      ],
+      llmOptions: [
+        { id: 'openai',    label: 'OpenAI gpt-4o-mini' },
+        { id: 'groq',      label: 'Groq Llama-3.3-70B' },
+        { id: 'anthropic', label: 'Anthropic Claude Haiku' },
+      ],
+      ttsOptions: [
+        { id: 'openai',     label: 'OpenAI tts-1' },
+        { id: 'elevenlabs', label: 'ElevenLabs Flash v2.5' },
+        { id: 'azure',      label: 'Azure Neural' },
+      ],
+      rtConnecting: false,
+      rtConnected: false,
+      rtSessionId: null,
+      rtStatus: '',
+      rtTranscript: [],
+      rtToolEvents: [],
+      rtMetrics: null,
+
+      // WebRTC state (audio only — no data channel, exactly like triage)
+      pc: null,
+      pcId: null,
+      micStream: null,
+      warmStream: null,   // pre-warmed mic so permission predates ICE gathering
+      ws: null,           // /ws control channel for transcripts (separate from audio)
+      monitorCtx: null,
+      levelRAF: null,
+      remoteRAF: null,
+      asstIdx: null,      // index of the assistant bubble currently streaming
+
+      micMuted: false,
+      audioChunksRx: 0,   // frames where the bot track is producing sound
+      audioCtxState: '',  // RTCPeerConnection.connectionState (shown on screen)
+
+      micLevel: 0,
+      isRtRtl() { return this.rtLanguage === 'ur-PK' || this.rtLanguage === 'pa-PK'; },
+
+      // Pre-warm the mic so the permission grant predates the first WebRTC
+      // offer — Chrome only exposes real host ICE candidates once gUM
+      // permission is held at gathering time. Best-effort, silent.
+      init() {
+        try {
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+              .then(s => { this.warmStream = s; })
+              .catch(() => {});
+          }
+        } catch {}
+      },
+
+      async testBeep() {
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          if (ctx.state === 'suspended') await ctx.resume();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          gain.gain.value = 0.2;
+          osc.frequency.value = 660;
+          osc.connect(gain).connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.35);
+          setTimeout(() => ctx.close().catch(() => {}), 700);
+          this.rtStatus = 'Test beep played — did you hear it?';
+        } catch (e) {
+          this.rtStatus = 'Beep failed: ' + (e.message || e);
+        }
+      },
+
+      async startRealtime() {
+        if (this.rtConnecting || this.rtConnected || this.pc) return;
+        if (!$store.app.token) { alert('Please log in first.'); return; }
+        console.info('[pipeline-ui v4 webrtc/triage-parity] starting realtime call — hard-reload (Cmd-Shift-R) if you do not see this');
+        this.rtConnecting = true;
+        this.rtStatus = 'Starting session…';
+        this.rtTranscript = [];
+        this.rtToolEvents = [];
+        this.rtMetrics = null;
+        this.audioChunksRx = 0;
+        this.asstIdx = null;
+        try {
+          // 1. Create session_id (analytics + CallLog parity).
+          const startResp = await $store.app.api('/test-session/start', {
+            method: 'POST',
+            body: JSON.stringify({ language: this.rtLanguage }),
+          });
+          if (!startResp || !startResp.ok) {
+            const err = await (startResp ? startResp.json().catch(() => ({})) : Promise.resolve({}));
+            throw new Error(err.detail || 'Failed to start session');
+          }
+          const startData = await startResp.json();
+          this.rtSessionId = startData.session_id;
+
+          // 2. Microphone (reuse pre-warmed stream when available).
+          this.rtStatus = 'Requesting microphone…';
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Microphone unavailable — open this page at http://localhost:8000 (a LAN IP / 0.0.0.0 is not a secure context, so the browser blocks the mic).');
+          }
+          this.micStream = (this.warmStream && this.warmStream.active)
+            ? this.warmStream
+            : await navigator.mediaDevices.getUserMedia({ audio: true });
+          this.warmStream = null;
+
+          // 3. Peer connection — same iceServers as triage.
+          this.pc = new RTCPeerConnection({
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:stun1.l.google.com:19302' },
+            ],
+          });
+          this.pc.onconnectionstatechange = () => {
+            if (!this.pc) return;
+            this.audioCtxState = this.pc.connectionState;
+            console.debug('[webrtc] connectionState:', this.pc.connectionState);
+            if (this.pc.connectionState === 'connected') {
+              this.rtStatus = 'Connected — speak now.';
+            } else if (this.pc.connectionState === 'failed') {
+              this.rtStatus = 'WebRTC connection FAILED (ICE could not connect).';
+              this.handleClose();
+            } else if (this.pc.connectionState === 'disconnected') {
+              this.rtStatus = 'WebRTC disconnected.';
+            }
+          };
+          this.pc.oniceconnectionstatechange = () => {
+            if (this.pc) console.debug('[webrtc] iceConnectionState:', this.pc.iceConnectionState);
+          };
+          this.pc.onicecandidateerror = (e) => {
+            console.warn('[webrtc] ICE candidate error', e.errorCode, e.errorText, e.url);
+          };
+
+          // Add the bidirectional audio transceiver (send mic + receive TTS) —
+          // exactly as triage does.
+          this.pc.addTransceiver('audio', { direction: 'sendrecv' });
+
+          // Bot audio → native <audio> element (browser handles Opus decode,
+          // jitter buffering, resampling — no hand-rolled PCM scheduling).
+          this.pc.ontrack = (event) => {
+            console.debug('[webrtc] remote track', event.track.kind);
+            const audio = document.getElementById('botAudio');
+            if (audio) {
+              audio.srcObject = event.streams[0];
+              audio.play().then(() => console.debug('[webrtc] bot audio playing'))
+                .catch((e) => {
+                  console.warn('[webrtc] autoplay blocked — will retry on click', e);
+                  document.addEventListener('click', () => audio.play().catch(() => {}), { once: true });
+                });
+            }
+            this.monitorRemote(event.streams[0]);
+          };
+
+          // 4. Attach mic, create offer, wait for FULL ICE gathering (the server
+          //    is non-trickle — it needs every candidate in the offer SDP).
+          this.micStream.getTracks().forEach(t => this.pc.addTrack(t, this.micStream));
+          this.rtStatus = 'Connecting…';
+          const offer = await this.pc.createOffer();
+          await this.pc.setLocalDescription(offer);
+          await this.waitIce();
+
+          // 5. Signal.
+          const resp = await $store.app.api('/test-session/offer', {
+            method: 'POST',
+            body: JSON.stringify({
+              sdp: this.pc.localDescription.sdp,
+              type: this.pc.localDescription.type,
+              session_id: this.rtSessionId,
+              language: this.rtLanguage,
+              stt_provider: this.rtStt,
+              llm_provider: this.rtLlm,
+              tts_provider: this.rtTts,
+              pc_id: this.pcId,
+            }),
+          });
+          if (!resp || !resp.ok) {
+            const err = await (resp ? resp.json().catch(() => ({})) : Promise.resolve({}));
+            throw new Error(err.detail || 'Offer rejected by server');
+          }
+          const answer = await resp.json();
+          this.pcId = answer.pc_id;
+          await this.pc.setRemoteDescription(new RTCSessionDescription({ sdp: answer.sdp, type: answer.type }));
+
+          // 6. Transcripts ride the separate /ws broadcast channel (triage-style).
+          this.connectControlWs();
+
+          // Show the greeting immediately (it is spoken by the bot on connect).
+          if (startData.reply_text) {
+            this.rtTranscript.push({ role: 'assistant', text: startData.reply_text });
+          }
+
+          this.rtConnecting = false;
+          this.rtConnected = true;
+          this.rtStatus = 'Connecting media…';   // becomes Connected on ICE connect
+          this.monitorLocal();
+        } catch (e) {
+          this.rtConnecting = false;
+          this.rtStatus = 'Error: ' + (e.message || e);
+          this.cleanup();
+        }
+      },
+
+      // Resolve when ICE gathering fully COMPLETES (fallback 3s). The server is
+      // non-trickle, so the offer SDP must carry the full candidate set.
+      waitIce() {
+        return new Promise((resolve) => {
+          if (!this.pc || this.pc.iceGatheringState === 'complete') return resolve();
+          const done = () => {
+            if (!this.pc || this.pc.iceGatheringState === 'complete') {
+              clearTimeout(timer);
+              if (this.pc) this.pc.removeEventListener('icegatheringstatechange', done);
+              resolve();
+            }
+          };
+          const timer = setTimeout(() => {
+            console.debug('[webrtc] ICE gather fallback (3s) — state:', this.pc && this.pc.iceGatheringState);
+            if (this.pc) this.pc.removeEventListener('icegatheringstatechange', done);
+            resolve();
+          }, 3000);
+          this.pc.addEventListener('icegatheringstatechange', done);
+        });
+      },
+
+      connectControlWs() {
+        try {
+          const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+          this.ws = new WebSocket(`${proto}://${location.host}/ws`);
+          this.ws.onmessage = (e) => this.onWsEvent(e.data);
+          this.ws.onerror = () => {};
+          this.ws.onclose = () => {};
+        } catch (e) { console.warn('[ws] control channel failed', e); }
+      },
+
+      // /ws broadcasts every session's call.* events; filter to ours.
+      onWsEvent(raw) {
+        let ev;
+        try { ev = JSON.parse(raw); } catch { return; }
+        if (ev.session_id && this.rtSessionId && ev.session_id !== this.rtSessionId) return;
+        const t = ev.type;
+        if (t === 'call.stt_partial') {
+          this.rtStatus = 'Hearing: ' + (ev.text || '');
+          return;
+        }
+        if (t === 'call.stt_final') {
+          if (ev.text) this.rtTranscript.push({ role: 'user', text: ev.text });
+          this.asstIdx = null;   // next assistant chunk starts a fresh bubble
+          this.rtStatus = 'Thinking…';
+          return;
+        }
+        if (t === 'call.assistant_response') {
+          if (!ev.text) return;
+          this.rtStatus = 'Speaking…';
+          if (this.asstIdx === null) {
+            this.rtTranscript.push({ role: 'assistant', text: ev.text });
+            this.asstIdx = this.rtTranscript.length - 1;
+          } else {
+            const cur = this.rtTranscript[this.asstIdx];
+            this.rtTranscript.splice(this.asstIdx, 1, { role: 'assistant', text: (cur ? cur.text : '') + ev.text });
+          }
+          return;
+        }
+        if (t === 'call.emergency') {
+          this.rtStatus = '⚠ Emergency detected — transferring.';
+          return;
+        }
+        if (t === 'call.ended') {
+          // server-side end (idle/emergency) — reflect it in the UI
+          if (ev.session_id === this.rtSessionId && this.rtConnected) this.rtStatus = 'Call ended (server).';
+          return;
+        }
+      },
+
+      toggleMute() {
+        this.micMuted = !this.micMuted;
+        if (this.micStream) this.micStream.getAudioTracks().forEach(t => t.enabled = !this.micMuted);
+      },
+
+      monitorLocal() {
+        try {
+          if (!this.monitorCtx) this.monitorCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const src = this.monitorCtx.createMediaStreamSource(this.micStream);
+          const an = this.monitorCtx.createAnalyser();
+          an.fftSize = 512;
+          src.connect(an);
+          const data = new Uint8Array(an.frequencyBinCount);
+          const loop = () => {
+            if (!this.rtConnected) return;
+            an.getByteTimeDomainData(data);
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+            this.micLevel = this.micMuted ? 0 : Math.sqrt(sum / data.length);
+            this.levelRAF = requestAnimationFrame(loop);
+          };
+          loop();
+        } catch (e) { console.warn('[webrtc] mic meter failed', e); }
+      },
+
+      monitorRemote(stream) {
+        try {
+          if (!this.monitorCtx) this.monitorCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const src = this.monitorCtx.createMediaStreamSource(stream);
+          const an = this.monitorCtx.createAnalyser();
+          an.fftSize = 512;
+          src.connect(an);
+          const data = new Uint8Array(an.frequencyBinCount);
+          const loop = () => {
+            if (!this.pc) return;
+            an.getByteTimeDomainData(data);
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+            if (Math.sqrt(sum / data.length) > 0.02) this.audioChunksRx += 1;
+            this.remoteRAF = requestAnimationFrame(loop);
+          };
+          loop();
+        } catch (e) { console.warn('[webrtc] bot meter failed', e); }
+      },
+
+      hangUp() {
+        this.cleanup();
+        this.rtStatus = 'Call ended.';
+      },
+
+      handleClose() {
+        this.cleanup();
+      },
+
+      cleanup() {
+        this.rtConnected = false;
+        this.rtConnecting = false;
+        if (this.levelRAF) { cancelAnimationFrame(this.levelRAF); this.levelRAF = null; }
+        if (this.remoteRAF) { cancelAnimationFrame(this.remoteRAF); this.remoteRAF = null; }
+        if (this.ws) { try { this.ws.close(); } catch {} this.ws = null; }
+        if (this.micStream) { try { this.micStream.getTracks().forEach(t => t.stop()); } catch {} this.micStream = null; }
+        if (this.pc) { try { this.pc.close(); } catch {} this.pc = null; }
+        if (this.monitorCtx) { try { this.monitorCtx.close(); } catch {} this.monitorCtx = null; }
+        const audio = document.getElementById('botAudio');
+        if (audio) { try { audio.srcObject = null; } catch {} }
+        this.micLevel = 0;
+        this.pcId = null;
+        this.asstIdx = null;
+      }
+    }">
+
+    <!-- Bot audio sink — WebRTC remote track is attached here for playback. -->
+    <audio id="botAudio" autoplay playsinline style="display:none;"></audio>
+
+    <div class="flex items-center justify-between flex-wrap gap-4">
+      <div>
+        <h2 class="text-lg font-semibold text-slate-100 flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full" :class="rtConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'"></span>
+          Live Realtime Call
+        </h2>
+        <p class="text-sm text-slate-400 mt-1">Continuous duplex audio over WebRTC — unified pipecat pipeline (same backend as telephony).</p>
+      </div>
+      <div class="flex items-center gap-3 flex-wrap">
+        <select x-model="rtLanguage" :disabled="rtConnected"
+          class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none">
+          <option value="en">English</option>
+          <option value="ur-PK">اردو (Urdu)</option>
+          <option value="pa-PK">پنجابی (Punjabi)</option>
+        </select>
+        <template x-if="!rtConnected">
+          <button @click="startRealtime()" :disabled="rtConnecting"
+            class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-semibold flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.95.68l1.5 4.5a1 1 0 01-.5 1.21l-2.26 1.13a11 11 0 005.52 5.52l1.13-2.26a1 1 0 011.21-.5l4.5 1.5a1 1 0 01.68.94V19a2 2 0 01-2 2A18 18 0 013 5z"/>
+            </svg>
+            <span x-text="rtConnecting ? 'Connecting…' : 'Start Realtime Call'"></span>
+          </button>
+        </template>
+        <button @click="testBeep()"
+          class="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm font-semibold flex items-center gap-2"
+          title="Play a 0.35s 660Hz beep. If silent, the bot will be silent too — check macOS output device / volume.">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.414A2 2 0 014 13.586V10.414a2 2 0 011.586-1.828L9 7.5l4.5-4v17L9 16.5l-3.414-1.086z"/>
+          </svg>
+          Test Beep
+        </button>
+        <template x-if="rtConnected">
+          <button @click="toggleMute()"
+            :class="micMuted ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-100'"
+            class="px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2"
+            :title="micMuted ? 'Mic is muted — server hears nothing. Click to unmute.' : 'Mute your mic (server hears nothing).'">
+            <template x-if="!micMuted">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-14 0m7 7v3m-4 0h8M12 3a3 3 0 00-3 3v5a3 3 0 006 0V6a3 3 0 00-3-3z"/>
+              </svg>
+            </template>
+            <template x-if="micMuted">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15.414A2 2 0 015 14V6a3 3 0 015.288-1.95M15 9.5V6a3 3 0 00-5.45-1.738M19 11a7 7 0 01-1.07 3.71M12 18v3m-4 0h8M3 3l18 18"/>
+              </svg>
+            </template>
+            <span x-text="micMuted ? 'Unmute' : 'Mute'"></span>
+          </button>
+        </template>
+        <template x-if="rtConnected">
+          <button @click="hangUp()" class="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            Hang Up
+          </button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Per-session provider selection (locked once connected). Sent in the
+         /offer body and drive the pipeline's STT/LLM/TTS builders. -->
+    <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div>
+        <label class="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">STT</label>
+        <select x-model="rtStt" :disabled="rtConnected"
+          class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none disabled:opacity-60">
+          <template x-for="o in sttOptions" :key="o.id">
+            <option :value="o.id" x-text="o.label"></option>
+          </template>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">LLM</label>
+        <select x-model="rtLlm" :disabled="rtConnected"
+          class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none disabled:opacity-60">
+          <template x-for="o in llmOptions" :key="o.id">
+            <option :value="o.id" x-text="o.label"></option>
+          </template>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">TTS</label>
+        <select x-model="rtTts" :disabled="rtConnected"
+          class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none disabled:opacity-60">
+          <template x-for="o in ttsOptions" :key="o.id">
+            <option :value="o.id" x-text="o.label"></option>
+          </template>
+        </select>
+      </div>
+    </div>
+
+    <div class="mt-3 flex items-center gap-3 flex-wrap" x-show="rtConnected || rtStatus">
+      <span class="text-xs text-slate-400" x-text="rtStatus"></span>
+      <div class="flex-1 max-w-xs h-1.5 bg-slate-700 rounded-full overflow-hidden" x-show="rtConnected">
+        <div class="h-full bg-emerald-400" :style="`width: ${Math.min(100, micLevel * 400)}%`"></div>
+      </div>
+      <span x-show="rtConnected" class="text-[10px] text-slate-500 font-mono"
+        x-text="`bot audio: ${audioChunksRx} (pc=${audioCtxState || '?'})`"
+        title="Frames where the bot's WebRTC track is producing sound, and the live RTCPeerConnection state. pc must reach 'connected' for any audio to flow."></span>
+      <span x-show="rtSessionId" class="text-xs text-slate-500 font-mono" x-text="rtSessionId"></span>
+    </div>
+
+    <div class="mt-3" x-show="rtConnected">
+      <p class="text-[10px] text-slate-500 italic leading-snug">
+        Same backend as a real phone call: SileroVAD → STT → LLM (tool_choice=auto) → TTS → cache, using the STT/LLM/TTS you selected above. The only difference vs telephony is the WebRTC transport. Use headphones — without them the bot's voice leaks into the mic and can cut itself off.
+      </p>
+    </div>
+
+    <div class="mt-4 max-h-72 overflow-y-auto rounded-xl bg-slate-900/60 border border-slate-700 p-3 space-y-2"
+      x-show="rtTranscript.length > 0" :class="isRtRtl() ? 'urdu-text' : ''">
+      <template x-for="(t, idx) in rtTranscript" :key="idx">
+        <div :class="t.role === 'user' ? 'justify-end' : 'justify-start'" class="flex">
+          <div :class="t.role === 'user' ? 'bg-sky-600 text-white' : 'bg-slate-700 text-slate-100'"
+            class="max-w-[80%] rounded-xl px-3 py-1.5 text-sm" x-text="t.text"></div>
+        </div>
+      </template>
+    </div>
+
+    <div class="mt-3" x-show="rtToolEvents.length > 0">
+      <p class="text-xs text-slate-500 mb-1">Tool calls executed</p>
+      <div class="space-y-1">
+        <template x-for="(ev, idx) in rtToolEvents" :key="idx">
+          <div class="text-xs font-mono bg-slate-900/80 border border-slate-700 rounded px-2 py-1 text-slate-300">
+            <span class="text-emerald-400" x-text="ev.name"></span><span class="text-slate-500" x-text="'(' + JSON.stringify(ev.args) + ')'"></span>
+            <span class="text-slate-500"> → </span><span x-text="JSON.stringify(ev.result).slice(0, 200)"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

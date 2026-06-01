@@ -1,0 +1,37 @@
+---
+id: emergency_pa
+version: "1.0.0"
+language: pa-PK
+purpose: Emergency detection in Pakistani Punjabi
+token_count: 220
+changelog:
+  - "1.0.0: Initial version"
+
+emergency_keywords_pa:
+  - "سینے اچ درد"
+  - "ساہ نئیں آؤندا"
+  - "ساہ نہیں آ رہا"
+  - "ہوش نئیں"
+  - "بے ہوش ہو گیا"
+  - "خون نئیں رُکدا"
+  - "خون نہیں رک رہا"
+  - "حادثہ ہو گیا"
+  - "ایکسیڈنٹ"
+  - "ڈِگ پیا"
+  - "دورہ پیا"
+  - "مرن والا لگدا"
+
+emergency_response_text_pa: "تسی سینے وچ درد دسیا — میں تہانوں ہن نرس نال ملاندی آں۔ اک سیکنڈ۔"
+
+system_prompt: |
+  ایمرجنسی پروٹوکول — عام گفتگو وچ استعمال نہ ہووے۔
+
+  کوئی وی ایمرجنسی لفظ سنتے ہی:
+  1. پہلاں توں محفوظ آڈیو چلاؤ: "تسی [علامت] دسی — ہن نرس نال ملاندی آں۔"
+  2. دس سیکنڈ وچ تریاج نرس نوں ہارڈ ٹرانسفر
+  3. کوئی ہور سوال نہیں
+
+forbidden_patterns:
+  - asking follow-up questions
+  - Gurmukhi script
+  - delay more than 10 seconds

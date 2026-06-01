@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+{% block title %}Patients — AI Medical Receptionist{% endblock %}
+{% block page_title %}Patients{% endblock %}
+
+{% block content %}
+<div
+  x-data="{
+    patients: [],
+    loading: false,
+    query: '',
+    page: 1,
+    pageSize: 20,
+    totalCount: 0,
+    selectedPatient: null,
+    detailOpen: false,
+    loadingDetail: false,
+    searchTimeout: null,
+
+    async init() {
+      await this.loadPatients();
+    },
+
+    async loadPatients() {
+      this.loading = true;
+      let params = new URLSearchParams({ page: this.page, page_size: this.pageSize });
+      if (this.query) params.append('q', this.query);
+      const r = await $store.app.api('/patients?' + params.toString());
+      if (r && r.ok) {
+        const d = await r.json();
+        this.patients = d.items || d || [];
+        this.totalCount = d.total || this.patients.length;
+      }
+      this.loading = false;
+    },
+
+    onSearch() {
+      clearTimeout(this.searchTimeout);
+      this.searchTimeout = setTimeout(() => { this.page = 1; this.loadPatients(); }, 400);
+    },
+
+    async openPatient(patient) {
+      this.detailOpen = true;
+      this.loadingDetail = true;
+      this.selectedPatient = { ...patient, call_history: [], appointments: [] };
+      const r = await $store.app.api('/patients/' + patient.id);
+      if (r && r.ok) {
+        const d = await r.json();
+        this.selectedPatient = { ...this.selectedPatient, ...d };
+      }
+      this.loadingDetail = false;
+    },
+
+    langBadgeClass(lang) {
+      const m = { ur: 'bg-sky-500/20 text-sky-400', pa: 'bg-green-500/20 text-green-400', en: 'bg-teal-500/20 text-teal-400' };
+      return m[lang] || 'bg-slate-500/20 text-slate-400';
+    },
+    langLabel(lang) {
+      const m = { ur: 'Urdu', pa: 'Punjabi', en: 'English' };
+      return m[lang] || lang;
+    },
+    outcomeBadgeClass(outcome) {
+      const m = { booked: 'bg-green-500/20 text-green-400', transferred: 'bg-yellow-500/20 text-yellow-400', completed: 'bg-teal-500/20 text-teal-400', failed: 'bg-red-500/20 text-red-400' };
+      return m[outcome] || 'bg-slate-500/20 text-slate-400';
+    },
+    genderLabel(g) {
+      const m = { M: 'Male', F: 'Female', O: 'Other' };
+      return m[g] || g || '—';
+    },
+    get totalPages() { return Math.ceil(this.totalCount / this.pageSize); }
+  }"
+  class="flex gap-6">
+
+  <!-- Patient List -->
+  <div :class="detailOpen ? 'w-1/2' : 'w-full'" class="transition-all duration-300 min-w-0">
+    <div class="space-y-4">
+
+      <!-- Search Bar -->
+      <div class="relative">
+        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+          <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        </div>
+        <input
+          type="text"
+          x-model="query"
+          @input="onSearch"
+          placeholder="Search patients by name, Urdu name, or phone..."
+          class="w-full bg-slate-800 border border-slate-600 text-slate-100 rounded-xl pl-11 pr-4 py-3 text-sm focus:outline-none focus:border-sky-500 placeholder-slate-500"
+        />
+        <template x-if="loading">
+          <div class="absolute inset-y-0 right-0 pr-4 flex items-center">
+            <svg class="animate-spin w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+          </div>
+        </template>
+      </div>
+
+      <!-- Table -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+          <h2 class="font-semibold text-slate-100">Patient Records</h2>
+          <span class="text-sm text-slate-400" x-text="totalCount + ' patients'"></span>
+        </div>
+
+        <!-- Skeleton -->
+        <template x-if="loading && patients.length === 0">
+          <div class="p-4 space-y-3">
+            <template x-for="i in [1,2,3,4,5,6,7,8]" :key="i">
+              <div class="flex items-center gap-4">
+                <div class="w-10 h-10 rounded-full skeleton flex-shrink-0"></div>
+                <div class="flex-1 space-y-2">
+                  <div class="h-3 rounded skeleton w-2/3"></div>
+                  <div class="h-3 rounded skeleton w-1/3"></div>
+                </div>
+                <div class="h-6 w-16 rounded-full skeleton"></div>
+                <div class="h-6 w-16 rounded-full skeleton"></div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-slate-700">
+                <th class="text-left px-5 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Patient</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Phone</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Language</th>
+                <th class="text-center px-4 py-3 text-xs font-medium text-slate-400 uppercase tracking-wide">Appointments</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-if="patients.length === 0 && !loading">
+                <tr><td colspan="4" class="text-center py-10 text-slate-400">No patients found</td></tr>
+              </template>
+              <template x-for="p in patients" :key="p.id">
+                <tr @click="openPatient(p)" :class="selectedPatient?.id === p.id ? 'bg-sky-500/10' : ''" class="border-b border-slate-700/50 hover:bg-slate-700/40 cursor-pointer transition-colors">
+                  <td class="px-5 py-3">
+                    <div class="flex items-center gap-3">
+                      <div class="w-9 h-9 rounded-full bg-sky-500/20 flex items-center justify-center flex-shrink-0 text-sky-400 font-semibold text-sm" x-text="(p.name_en || p.name || 'P')[0].toUpperCase()"></div>
+                      <div class="min-w-0">
+                        <p class="text-slate-200 font-medium truncate" x-text="p.name_en || p.name || '—'"></p>
+                        <template x-if="p.name_ur">
+                          <p class="urdu-text text-slate-400 text-xs truncate" x-text="p.name_ur"></p>
+                        </template>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 font-mono text-slate-300 text-sm" x-text="p.phone ? '***-***-' + p.phone.slice(-4) : '—'"></td>
+                  <td class="px-4 py-3">
+                    <span :class="langBadgeClass(p.preferred_language)" class="px-2.5 py-0.5 rounded-full text-xs font-medium" x-text="langLabel(p.preferred_language)"></span>
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <span class="bg-slate-700 text-slate-300 text-xs px-2.5 py-0.5 rounded-full font-medium" x-text="p.appointment_count || 0"></span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex items-center justify-between px-5 py-4 border-t border-slate-700">
+          <span class="text-sm text-slate-400" x-text="'Page ' + page + ' of ' + (totalPages || 1)"></span>
+          <div class="flex gap-2">
+            <button @click="page > 1 && (page--) && loadPatients()" :disabled="page <= 1" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-lg text-sm transition-colors">Previous</button>
+            <button @click="page < totalPages && (page++) && loadPatients()" :disabled="page >= totalPages" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-lg text-sm transition-colors">Next</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Patient Detail Panel (slides in from right) -->
+  <div
+    x-show="detailOpen"
+    x-transition:enter="transition ease-out duration-300"
+    x-transition:enter-start="opacity-0 translate-x-8"
+    x-transition:enter-end="opacity-100 translate-x-0"
+    x-transition:leave="transition ease-in duration-200"
+    x-transition:leave-start="opacity-100 translate-x-0"
+    x-transition:leave-end="opacity-0 translate-x-8"
+    class="w-1/2 min-w-0 flex-shrink-0">
+
+    <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
+
+      <!-- Panel Header -->
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+        <h2 class="font-semibold text-slate-100">Patient Profile</h2>
+        <button @click="detailOpen = false; selectedPatient = null" class="text-slate-400 hover:text-slate-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Skeleton Detail -->
+      <template x-if="loadingDetail">
+        <div class="p-5 space-y-4">
+          <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-full skeleton"></div>
+            <div class="flex-1 space-y-2">
+              <div class="h-4 rounded skeleton w-1/2"></div>
+              <div class="h-3 rounded skeleton w-1/3"></div>
+            </div>
+          </div>
+          <div class="space-y-3">
+            <template x-for="i in [1,2,3,4]" :key="i">
+              <div class="h-10 rounded-xl skeleton"></div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="!loadingDetail && selectedPatient">
+        <div class="overflow-y-auto max-h-[calc(100vh-200px)]">
+
+          <!-- Demographics -->
+          <div class="p-5 border-b border-slate-700">
+            <div class="flex items-center gap-4 mb-4">
+              <div class="w-16 h-16 rounded-full bg-sky-500/20 flex items-center justify-center text-sky-400 text-2xl font-bold flex-shrink-0" x-text="(selectedPatient.name_en || selectedPatient.name || 'P')[0].toUpperCase()"></div>
+              <div>
+                <h3 class="text-xl font-semibold text-slate-100" x-text="selectedPatient.name_en || selectedPatient.name || '—'"></h3>
+                <template x-if="selectedPatient.name_ur">
+                  <p class="urdu-text text-slate-400 text-sm" x-text="selectedPatient.name_ur"></p>
+                </template>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div class="bg-slate-900/60 rounded-xl p-3">
+                <p class="text-xs text-slate-500 mb-1">Phone</p>
+                <p class="text-slate-300 font-mono" x-text="selectedPatient.phone ? '***-***-' + selectedPatient.phone.slice(-4) : '—'"></p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-3">
+                <p class="text-xs text-slate-500 mb-1">Language</p>
+                <span :class="langBadgeClass(selectedPatient.preferred_language)" class="px-2 py-0.5 rounded-full text-xs font-medium" x-text="langLabel(selectedPatient.preferred_language)"></span>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-3">
+                <p class="text-xs text-slate-500 mb-1">Birth Year</p>
+                <p class="text-slate-300" x-text="selectedPatient.birth_year || '—'"></p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-3">
+                <p class="text-xs text-slate-500 mb-1">Gender</p>
+                <p class="text-slate-300" x-text="genderLabel(selectedPatient.gender)"></p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-3 col-span-2">
+                <p class="text-xs text-slate-500 mb-1">WhatsApp Opt-In</p>
+                <div class="flex items-center gap-2">
+                  <div :class="selectedPatient.whatsapp_opted_in ? 'bg-green-500' : 'bg-slate-600'" class="w-2 h-2 rounded-full"></div>
+                  <p class="text-slate-300 text-sm" x-text="selectedPatient.whatsapp_opted_in ? 'Opted In' : 'Not Opted In'"></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Call History Timeline -->
+          <div class="p-5 border-b border-slate-700">
+            <h4 class="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Recent Calls
+            </h4>
+            <template x-if="!selectedPatient.call_history || selectedPatient.call_history.length === 0">
+              <p class="text-slate-500 text-sm">No call history</p>
+            </template>
+            <div class="space-y-2">
+              <template x-for="(call, idx) in (selectedPatient.call_history || []).slice(0, 5)" :key="idx">
+                <div class="flex items-center gap-3 py-2">
+                  <div class="w-2 h-2 bg-slate-600 rounded-full flex-shrink-0 mt-1"></div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="text-slate-300 text-xs" x-text="call.created_at ? new Date(call.created_at).toLocaleDateString('en-PK') : '—'"></span>
+                      <span :class="outcomeBadgeClass(call.outcome)" class="px-2 py-0.5 rounded-full text-xs font-medium capitalize" x-text="(call.outcome || '—').replace('_', ' ')"></span>
+                      <span :class="langBadgeClass(call.language)" class="px-2 py-0.5 rounded-full text-xs font-medium" x-text="langLabel(call.language)"></span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Appointment History -->
+          <div class="p-5">
+            <h4 class="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              Appointments
+            </h4>
+            <template x-if="!selectedPatient.appointments || selectedPatient.appointments.length === 0">
+              <p class="text-slate-500 text-sm">No appointment history</p>
+            </template>
+            <div class="space-y-2">
+              <template x-for="(appt, idx) in (selectedPatient.appointments || [])" :key="idx">
+                <div class="flex items-center justify-between bg-slate-900/60 rounded-lg p-3">
+                  <div>
+                    <p class="text-slate-300 text-sm font-medium" x-text="appt.doctor_name || 'Doctor'"></p>
+                    <p class="text-slate-400 text-xs mt-0.5" x-text="appt.appointment_time || '—'"></p>
+                  </div>
+                  <span class="px-2 py-0.5 rounded-full text-xs font-medium capitalize" :class="appt.status === 'completed' ? 'bg-green-500/20 text-green-400' : appt.status === 'cancelled' ? 'bg-red-500/20 text-red-400' : 'bg-sky-500/20 text-sky-400'" x-text="appt.status || 'scheduled'"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+        </div>
+      </template>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

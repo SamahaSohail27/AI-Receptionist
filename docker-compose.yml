@@ -1,0 +1,121 @@
+version: "3.9"
+
+# AI Medical Receptionist — local development + staging compose file
+#
+# Usage:
+#   cp .env.example .env          # fill in API keys
+#   docker compose up --build     # first run
+#   docker compose up             # subsequent runs
+#   docker compose down -v        # full teardown (drops DB volume)
+#
+# Services:
+#   api      — FastAPI on :8000  (HTTP + WebSocket)
+#   worker   — Celery worker (reminders, analytics ingestion)
+#   db       — PostgreSQL 15
+#   redis    — Redis 7 (Celery broker + session locks)
+#
+# The Pipecat voice pipeline runs inside the `api` service on WebSocket
+# port 8001 (mapped to host :8001 as well). No separate container needed.
+
+services:
+
+  # -------------------------------------------------------------------------
+  # FastAPI + Pipecat voice pipeline
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_receptionist_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # HTTP API + Jinja2 UI
+      - "8001:8001"   # Pipecat WebSocket (telephony audio stream)
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://ai_user:ai_pass@db:5432/ai_receptionist"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/1"
+    env_file:
+      - .env
+    volumes:
+      - tts_cache:/app/tts_cache
+      - ./prompts:/app/prompts:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # -------------------------------------------------------------------------
+  # Celery worker — reminders, analytics writes
+  # -------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_receptionist_worker
+    restart: unless-stopped
+    command: celery -A scheduling.reminders worker --loglevel=info --concurrency=4
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://ai_user:ai_pass@db:5432/ai_receptionist"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/1"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # -------------------------------------------------------------------------
+  # PostgreSQL 15
+  # -------------------------------------------------------------------------
+  db:
+    image: postgres:15-alpine
+    container_name: ai_receptionist_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ai_user
+      POSTGRES_PASSWORD: ai_pass
+      POSTGRES_DB: ai_receptionist
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_user -d ai_receptionist"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"   # only for local debug — remove in production
+
+  # -------------------------------------------------------------------------
+  # Redis 7
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ai_receptionist_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "6379:6379"   # only for local debug — remove in production
+
+volumes:
+  pg_data:
+  redis_data:
+  tts_cache:
